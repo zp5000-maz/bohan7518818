@@ -3,74 +3,117 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>博瀚文理 - 打卡系統</title>
+  <title>博瀚文理 - 考勤系統</title>
   <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.js"></script>
   <style>
-    body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background-color: #f0f4f8; margin: 0; padding: 20px; }
+    body { font-family: "Microsoft JhengHei", sans-serif; display: flex; flex-direction: column; align-items: center; background-color: #f0f4f8; margin: 0; padding: 20px; }
     #video-box { position: relative; width: 100%; max-width: 450px; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.2); background: #000; }
     video { width: 100%; display: block; }
-    #status { margin-top: 20px; padding: 15px 30px; background: white; border-radius: 50px; font-weight: bold; font-size: 1.2rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; min-width: 200px; }
-    .success { color: #1e8e3e; background: #e6f4ea !important; }
+    #status { margin-top: 20px; padding: 15px 30px; background: white; border-radius: 50px; font-weight: bold; font-size: 1.2rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; min-width: 250px; }
+    
+    /* 按鈕 UI */
+    #button-overlay { display: none; margin-top: 20px; gap: 20px; }
+    .btn { padding: 15px 40px; border: none; border-radius: 10px; font-size: 1.5rem; font-weight: bold; cursor: pointer; color: white; transition: 0.3s; }
+    .btn-on { background-color: #28a745; }
+    .btn-off { background-color: #dc3545; }
+    .btn:active { transform: scale(0.9); }
   </style>
 </head>
 <body>
-  <h2 style="color: #1a73e8;">博瀚文理 - AI 打卡機</h2>
-  <div id="video-box"><video id="video" autoplay muted playsinline></video></div>
-  <div id="status">載入中...</div>
+
+  <h2 style="color: #1a73e8;">博瀚文理 - 老師考勤系統</h2>
+  <div id="video-box">
+    <video id="video" autoplay muted playsinline></video>
+  </div>
+  
+  <div id="status">系統啟動中...</div>
+
+  <div id="button-overlay">
+    <button class="btn btn-on" onclick="handlePunch('上班')">上班打卡</button>
+    <button class="btn btn-off" onclick="handlePunch('下班')">下班打卡</button>
+  </div>
 
   <script>
     const video = document.getElementById('video');
     const status = document.getElementById('status');
-    const GAS_URL = 'https://script.google.com/macros/s/AKfycbyl1RP4DAE5GhamTdPJkaAiRlqikNsL3Y2v4m1FEWh26yL13r6AnNAMBCevw3jAqULTQA/exec'; 
+    const btnOverlay = document.getElementById('button-overlay');
+    
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbz4i1WfbX3s1l66e-bDi4BBibFgfeBuSD1cPlJ4pL3QcBGa42rRXv7acC83DaEwcWNRSA/exec'; 
     const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+    
     let faceMatcher = null;
+    let currentTeacher = "";
+    let isProcessing = false;
 
     async function init() {
       try {
-        status.innerText = '正在下載 AI 模型...';
         await faceapi.nets.tinyFaceDetector.load(MODEL_URL);
         await faceapi.nets.faceLandmark68Net.load(MODEL_URL);
         await faceapi.nets.faceRecognitionNet.load(MODEL_URL);
         
-        status.innerText = '正在更新學生名單...';
-        await loadMemberData();
-        startCamera();
-      } catch (e) { status.innerText = '系統初始化失敗'; }
-    }
-
-    async function loadMemberData() {
-      try {
+        status.innerText = '載入名單中...';
         const response = await fetch(GAS_URL);
         const data = await response.json();
-        if (data.length === 0) { status.innerText = '請先去註冊學生'; return; }
-        const labeled = data.map(m => new faceapi.LabeledFaceDescriptors(m.name, [new Float32Array(m.descriptor)]));
-        faceMatcher = new faceapi.FaceMatcher(labeled, 0.55); // 0.55 為嚴謹度
-        status.innerText = '已就緒，請對準臉部';
-      } catch (e) { status.innerText = '名單載入失敗'; }
+        const labeledDescriptors = data.map(m => new faceapi.LabeledFaceDescriptors(m.name, [new Float32Array(m.descriptor)]));
+        faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.6);
+        
+        startCamera();
+      } catch (e) { status.innerText = '系統錯誤，請檢查網路'; }
     }
 
     async function startCamera() {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
       video.srcObject = stream;
-      video.onloadedmetadata = () => { video.play(); detect(); };
+      video.onloadedmetadata = () => {
+        video.play();
+        status.innerText = '請對準臉部進行辨識';
+        detect();
+      };
     }
 
     async function detect() {
-      if (!faceMatcher) return;
-      const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
+      if (isProcessing) return;
+
+      const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+                                    .withFaceLandmarks()
+                                    .withFaceDescriptor();
+
       if (detection) {
-        const match = faceMatcher.findBestMatch(detection.descriptor);
-        if (match.label !== 'unknown') {
-          status.innerText = '你好，' + match.label + '！打卡中...';
-          status.classList.add('success');
-          await fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ action: "checkin", name: match.label }) });
-          await new Promise(r => setTimeout(r, 8000)); // 冷卻
-          status.classList.remove('success');
-          status.innerText = '請對準臉部進行辨識';
+        const bestMatch = faceMatcher.findBestMatch(detection.descriptor);
+        if (bestMatch.label !== 'unknown') {
+          currentTeacher = bestMatch.label;
+          status.innerText = currentTeacher + ' 老師，請選擇打卡狀態';
+          btnOverlay.style.display = 'flex'; // 顯示按鈕
+          isProcessing = true; // 暫停辨識，直到按按鈕
+          return;
         }
       }
       requestAnimationFrame(detect);
     }
+
+    async function handlePunch(type) {
+      status.innerText = '正在處理 ' + type + ' 紀錄...';
+      btnOverlay.style.display = 'none';
+
+      try {
+        const response = await fetch(GAS_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          body: JSON.stringify({ action: "checkin", name: currentTeacher, type: type })
+        });
+
+        status.innerText = currentTeacher + ' ' + type + ' 成功！';
+        setTimeout(() => {
+          status.innerText = '請對準臉部進行辨識';
+          isProcessing = false;
+          detect();
+        }, 5000);
+      } catch (e) {
+        status.innerText = '傳送失敗，請洽管理員';
+        setTimeout(() => { isProcessing = false; detect(); }, 3000);
+      }
+    }
+
     init();
   </script>
 </body>
