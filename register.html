@@ -1,45 +1,54 @@
-!DOCTYPE html
-html
-head
-  meta charset=UTF-8
-  meta name=viewport content=width=device-width, initial-scale=1.0
-  title學生註冊系統title
-  script src=httpscdn.jsdelivr.netnpm@vladmandicface-api@1.7.12distface-api.jsscript
-  style
-    body { font-family sans-serif; text-align center; padding 20px; background #eef2f5; }
-    #video-box { width 100%; max-width 400px; margin auto; border-radius 15px; overflow hidden; background #000; }
-    video { width 100%; display block; }
-    input { padding 10px; font-size 16px; width 200px; margin 10px; border-radius 5px; border 1px solid #ccc; }
-    button { padding 10px 20px; font-size 16px; background #28a745; color white; border none; border-radius 5px; cursor pointer; }
-    #msg { margin-top 10px; font-weight bold; color #555; }
-  style
-head
-body
-  h2新增學生臉部資料h2
-  div id=video-boxvideo id=video autoplay muted playsinlinevideodiv
-  input type=text id=userName placeholder=請輸入學生姓名
-  br
-  button onclick=registerFace()擷取臉部並註冊button
-  div id=msg正在啟動系統...div
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>學生註冊系統</title>
+  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.js"></script>
+  <style>
+    body { font-family: sans-serif; text-align: center; padding: 20px; background: #eef2f5; }
+    #video-box { width: 100%; max-width: 400px; margin: auto; border-radius: 15px; overflow: hidden; background: #000; position: relative; }
+    video { width: 100%; display: block; }
+    input { padding: 10px; font-size: 16px; width: 200px; margin: 10px; border-radius: 5px; border: 1px solid #ccc; }
+    button { padding: 10px 20px; font-size: 16px; background: #28a745; color: white; border: none; border-radius: 5px; cursor: pointer; }
+    #msg { margin-top: 10px; font-weight: bold; color: #555; }
+  </style>
+</head>
+<body>
+  <h2>新增學生臉部資料</h2>
+  <div id="video-box">
+    <video id="video" autoplay muted playsinline></video>
+  </div>
+  <input type="text" id="userName" placeholder="請輸入學生姓名">
+  <br>
+  <button onclick="registerFace()">擷取臉部並註冊</button>
+  <div id="msg">正在啟動系統...</div>
 
-  script
+  <script>
     const video = document.getElementById('video');
     const msg = document.getElementById('msg');
-    const GAS_URL = 'YOUR_GAS_URL';  --- 填入你的 GAS 網址
-    const MODEL_URL = 'httpscdn.jsdelivr.netnpm@vladmandicface-apimodel';
+    
+    // --- 這裡請務必填入你的 GAS 網址 ---
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbxpJpOlqfiy683sjaGZ7loUjbLHXHq8pXox-9M0bhwZC_q-wQv_8vaTkfO2ekmPk8Rk7A/exec'; 
+    
+    const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
 
     async function init() {
-      await faceapi.nets.tinyFaceDetector.load(MODEL_URL);
-      await faceapi.nets.faceLandmark68Net.load(MODEL_URL);
-      await faceapi.nets.faceRecognitionNet.load(MODEL_URL);
-      const stream = await navigator.mediaDevices.getUserMedia({ video {} });
-      video.srcObject = stream;
-      msg.innerText = '系統就緒，請輸入姓名後按註冊';
+      try {
+        await faceapi.nets.tinyFaceDetector.load(MODEL_URL);
+        await faceapi.nets.faceLandmark68Net.load(MODEL_URL);
+        await faceapi.nets.faceRecognitionNet.load(MODEL_URL);
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+        video.srcObject = stream;
+        msg.innerText = '系統就緒，請輸入姓名後按註冊';
+      } catch (e) {
+        msg.innerText = '啟動失敗：' + e.message;
+      }
     }
 
     async function registerFace() {
       const name = document.getElementById('userName').value;
-      if (!name) { alert(請先輸入姓名！); return; }
+      if (!name) { alert("請先輸入姓名！"); return; }
       
       msg.innerText = '正在擷取特徵，請保持不動...';
       const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
@@ -52,21 +61,24 @@ body
       }
 
       const payload = {
-        action register,
-        name name,
-        descriptor Array.from(detection.descriptor)  將特徵轉為陣列
+        action: "register",
+        name: name,
+        descriptor: Array.from(detection.descriptor)
       };
 
-      fetch(GAS_URL, {
-        method 'POST',
-        mode 'no-cors',
-        body JSON.stringify(payload)
-      });
-
-      msg.innerText = name + ' 註冊指令已送出！請檢查試算表。';
-      document.getElementById('userName').value = ;
+      try {
+        await fetch(GAS_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          body: JSON.stringify(payload)
+        });
+        msg.innerText = name + ' 註冊指令已送出！請檢查試算表 Members 分頁。';
+        document.getElementById('userName').value = "";
+      } catch (err) {
+        msg.innerText = '傳送失敗：' + err.message;
+      }
     }
     init();
-  script
-body
-html
+  </script>
+</body>
+</html>
