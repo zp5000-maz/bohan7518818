@@ -4,14 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>博瀚文理 - 打卡系統</title>
-  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.js"></script>
   <style>
     body { font-family: "Microsoft JhengHei", sans-serif; display: flex; flex-direction: column; align-items: center; background-color: #f0f4f8; margin: 0; padding: 20px; }
     #video-box { position: relative; width: 100%; max-width: 400px; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.2); background: #000; }
     video { width: 100%; display: block; }
     #status { margin-top: 20px; padding: 15px 30px; background: white; border-radius: 50px; font-weight: bold; color: #333; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
-    .err { color: #d93025; background: #fce8e6; }
-    .ok { color: #1e8e3e; background: #e6f4ea; }
   </style>
 </head>
 <body>
@@ -22,75 +20,69 @@
     <video id="video" autoplay muted playsinline></video>
   </div>
 
-  <div id="status">正在下載 AI 模型...</div>
+  <div id="status">準備中，請稍候...</div>
 
   <script>
     const video = document.getElementById('video');
     const status = document.getElementById('status');
     const GAS_URL = 'https://script.google.com/macros/s/AKfycbyXuZGpHgePe47vGm7R6h2s6yjy3PrSdaQ2-PlmaPa5Iq4Lp1x22M_fOJNmW2v_hIIg_w/exec'; 
-    const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/weights';
+    // 更換模型路徑到官方穩定源
+    const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
 
     async function init() {
       try {
-        // 分段載入模型並更新狀態，避免看起來像當機
-        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-        status.innerText = '模型載入中 (30%)...';
-        await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
-        status.innerText = '模型載入中 (60%)...';
-        await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
-        status.innerText = '載入完成，啟動鏡頭...';
+        status.innerText = '正在下載 AI 模型...';
         
+        // 分段載入
+        await faceapi.nets.tinyFaceDetector.load(MODEL_URL);
+        await faceapi.nets.faceLandmark68Net.load(MODEL_URL);
+        await faceapi.nets.faceRecognitionNet.load(MODEL_URL);
+        
+        status.innerText = '載入完成，啟動鏡頭...';
         startCamera();
       } catch (e) {
-        status.innerText = '初始化失敗，請確認網路或使用 Safari';
-        status.className = 'err';
+        status.innerText = '載入失敗，請務必使用 Safari 開啟';
+        console.error(e);
       }
     }
 
-    function startCamera() {
-      navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } })
-        .then(stream => {
-          video.srcObject = stream;
-          // iPhone 必須手動觸發 play()
-          video.onloadedmetadata = () => {
-            video.play();
-            status.innerText = '系統運作中，請對準臉部';
-            detect();
-          };
-        })
-        .catch(err => {
-          status.innerText = '鏡頭開啟失敗，請檢查權限';
-          status.className = 'err';
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { facingMode: "user" } 
         });
+        video.srcObject = stream;
+        video.onloadedmetadata = () => {
+          video.play();
+          status.innerText = '系統運作中，請對準臉部';
+          detect();
+        };
+      } catch (err) {
+        status.innerText = '鏡頭開啟失敗，請允許攝影機權限';
+      }
     }
 
     async function detect() {
       const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions());
-      
       if (detection) {
-        status.innerText = '辨識成功，傳送資料...';
-        status.className = 'ok';
-        
-        await sendToGas("測試人員"); // 此處未來可替換為人臉比對後的姓名
-        
-        // 辨識成功後冷卻 8 秒，防止過熱
-        await new Promise(r => setTimeout(r, 8000));
+        status.innerText = '辨識成功，連線中...';
+        await sendToGas("測試人員");
+        await new Promise(r => setTimeout(r, 8000)); // 冷卻時間
         status.innerText = '請對準臉部進行辨識';
-        status.className = '';
       }
       requestAnimationFrame(detect);
     }
 
     async function sendToGas(userName) {
       try {
-        await fetch(GAS_URL, {
+        fetch(GAS_URL, {
           method: 'POST',
-          mode: 'no-cors', // 解決跨網域問題
+          mode: 'no-cors',
           body: JSON.stringify({ name: userName })
         });
-        status.innerText = userName + ' 打卡已傳送！';
+        status.innerText = userName + ' 打卡已傳送';
       } catch (e) {
-        console.log("傳送完成（no-cors 模式無法讀取回傳值）");
+        console.log("傳送完成");
       }
     }
 
