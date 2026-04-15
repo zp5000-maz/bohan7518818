@@ -1,112 +1,142 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>補習班人臉打卡系統</title>
-    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
-    <style>
-        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f2f5; margin: 0; padding: 20px; touch-action: manipulation; }
-        #container { position: relative; width: 100%; max-width: 400px; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.2); background: #000; }
-        video { width: 100%; display: block; }
-        canvas { position: absolute; top: 0; left: 0; }
-        #status { margin-top: 20px; padding: 15px 30px; border-radius: 50px; background: white; font-weight: bold; font-size: 1.2rem; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-        .success { color: #2ecc71; }
-        .error { color: #e74c3c; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>博瀚文理 - 打卡系統</title>
+  <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+  <style>
+    body { font-family: "Microsoft JhengHei", Arial, sans-serif; display: flex; flex-direction: column; align-items: center; background-color: #f4f7f9; margin: 0; padding: 20px; }
+    h2 { color: #1a73e8; margin-bottom: 10px; }
+    
+    #video-container { 
+      position: relative; 
+      width: 100%; 
+      max-width: 480px; 
+      aspect-ratio: 4/3;
+      background: #000; 
+      border-radius: 15px; 
+      overflow: hidden; 
+      box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+    }
+    
+    video { width: 100%; height: 100%; object-fit: cover; }
+    canvas { position: absolute; top: 0; left: 0; }
+
+    #status-box {
+      margin-top: 25px;
+      padding: 15px 40px;
+      background: #ffffff;
+      border-radius: 30px;
+      font-size: 1.2rem;
+      font-weight: bold;
+      color: #5f6368;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      transition: all 0.3s ease;
+    }
+    
+    .success { color: #28a745 !important; background: #e8f5e9 !important; }
+    .error { color: #d93025 !important; background: #fce8e6 !important; }
+  </style>
 </head>
 <body>
 
-    <h2 style="color: #1a73e8;">補瀚文理 - 打卡系統</h2>
-    <div id="container">
-        <video id="video" autoplay muted playsinline></video>
-    </div>
-    <div id="status">正在啟動系統...</div>
+  <h2>博瀚文理 - 打卡系統</h2>
+  
+  <div id="video-container">
+    <video id="video" autoplay muted playsinline></video>
+  </div>
 
-    <script>
-        const video = document.getElementById('video');
-        const status = document.getElementById('status');
-        const GAS_URL = "https://script.google.com/macros/s/AKfycbzzTtGHlad3ELhjNY_Ub62emrThhSOtJIfIJgYMxG1d-ClrKftDx_XxQkS3ea4HSxqo8A/exec"; // <-- 這裡換成你的 GAS URL
+  <div id="status-box">正在啟動系統...</div>
 
-        // 1. 載入 face-api.js 模型 (iPhone 7 跑這幾個輕量版最流暢)
-        async function loadModels() {
-            const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
-            await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-            await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
-            await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
-            startVideo();
-        }
+  <script>
+    const video = document.getElementById('video');
+    const statusBox = document.getElementById('status-box');
+    
+    // --- 請在此處填入您的 GAS 部署網址 ---
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbxZHLFiyPNTuC0SucuAyN_XKxWt8k8LSJ-0-3dvYEzVsyt88HM0VTvDc0ADqBelALPSHQ/exec'; 
 
-        // 2. 啟動鏡頭
-        function startVideo() {
-            navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } })
-                .then(stream => {
-                    video.srcObject = stream;
-                    status.innerText = "請對準鏡頭";
-                })
-                .catch(err => {
-                    status.innerText = "無法開啟鏡頭，請檢查權限";
-                    console.error(err);
-                });
-        }
+    // 使用官方維護的模型路徑，確保 iPhone 載入不會出錯
+    const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/weights';
 
-        // 3. 核心比對邏輯
-        video.addEventListener('play', () => {
-            const canvas = faceapi.createCanvasFromMedia(video);
-            document.getElementById('container').append(canvas);
-            const displaySize = { width: video.clientWidth, height: video.clientHeight };
-            faceapi.matchDimensions(canvas, displaySize);
+    async function init() {
+      try {
+        // 同步載入辨識模型
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+          faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
+        ]);
+        
+        statusBox.innerText = '模型載入完成，啟動鏡頭...';
+        startCamera();
+      } catch (err) {
+        statusBox.innerText = '系統初始化失敗，請重新整理';
+        console.error(err);
+      }
+    }
 
-            // 這裡假設你已經有一組特徵值 (例如: 某老師)
-            // 實務上你會從資料庫抓取所有老師/學生的特徵陣列
-            setInterval(async () => {
-                const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
-                    .withFaceLandmarks()
-                    .withFaceDescriptors();
+    function startCamera() {
+      // 請求鏡頭權限
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } })
+        .then(stream => {
+          video.srcObject = stream;
+          statusBox.innerText = '請對準臉部進行辨識';
+          onPlay();
+        })
+        .catch(err => {
+          statusBox.innerText = '無法開啟鏡頭，請檢查 Safari 權限';
+          statusBox.classList.add('error');
+        });
+    }
 
-                const resizedDetections = faceapi.resizeResults(detections, displaySize);
-                canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
-                faceapi.draw.drawDetections(canvas, resizedDetections);
+    async function onPlay() {
+      // 偵測單一人臉
+      const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions());
 
-                if (detections.length > 0) {
-                    // 比對邏輯：這裡僅作示範，偵測到人臉就觸發 (實務上要比對 Descriptor)
-                    // 假設辨識出是 "王老師"
-                    checkIn("測試人員"); 
-                }
-            }, 3000); // 每 3 秒比對一次，避免 iPhone 7 過熱
+      if (detection) {
+        // 當偵測到臉部時，執行打卡邏輯
+        // 註：實務上此處需加入 faceapi.computeFaceDescriptor 進行人臉比對
+        // 目前示範為偵測到人臉即觸發，請將下方姓名換成動態獲取的姓名
+        handleCheckIn("測試人員"); 
+        
+        // 辨識成功後暫停 8 秒，防止重複偵測與過熱
+        await new Promise(resolve => setTimeout(resolve, 8000));
+      }
+      
+      // 循環偵測
+      requestAnimationFrame(onPlay);
+    }
+
+    async function handleCheckIn(userName) {
+      statusBox.innerText = '辨識成功，連線中...';
+      
+      try {
+        const response = await fetch(GAS_URL, {
+          method: 'POST',
+          mode: 'no-cors', // 解決跨網域問題
+          body: JSON.stringify({ name: userName })
         });
 
-        // 4. 發送到 GAS
-        let isProcessing = false;
-        async function checkIn(name) {
-            if (isProcessing) return;
-            isProcessing = true;
-            status.innerText = `正在為 ${name} 辦理打卡...`;
+        // 由於 no-cors 模式無法讀取 response 內容
+        // 建議在 GAS 端確認資料有無寫入，或改用正統 CORS 設定
+        statusBox.innerText = userName + ' 打卡資訊已傳送';
+        statusBox.classList.add('success');
+        
+        // 3秒後恢復狀態
+        setTimeout(() => {
+          statusBox.innerText = '請對準臉部進行辨識';
+          statusBox.classList.remove('success');
+        }, 3000);
 
-            try {
-                const response = await fetch(GAS_URL, {
-                    method: 'POST',
-                    body: JSON.stringify({ name: name })
-                });
-                const result = await response.json();
-                
-                if (result.status === "success") {
-                    status.innerHTML = `<span class="success">${result.message}</span>`;
-                } else {
-                    status.innerHTML = `<span class="error">${result.message}</span>`;
-                }
-            } catch (e) {
-                status.innerText = "通訊失敗，請檢查網路";
-            }
+      } catch (error) {
+        statusBox.innerText = '連線失敗，請檢查網路';
+        statusBox.classList.add('error');
+      }
+    }
 
-            // 5 秒後恢復辨識狀態
-            setTimeout(() => {
-                isProcessing = false;
-                status.innerText = "請對準鏡頭";
-            }, 5000);
-        }
-
-        loadModels();
-    </script>
+    // 啟動系統
+    init();
+  </script>
 </body>
 </html>
