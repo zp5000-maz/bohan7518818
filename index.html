@@ -3,25 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>博瀚文理 - 考勤拍照版</title>
+  <title>博瀚文理 - 考勤系統</title>
   <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.js"></script>
   <style>
     body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f4f8; margin: 0; padding: 20px; }
-    #video-box { position: relative; width: 100%; max-width: 450px; border-radius: 20px; overflow: hidden; background: #000; }
+    #video-box { position: relative; width: 100%; max-width: 450px; border-radius: 20px; overflow: hidden; background: #000; box-shadow: 0 10px 25px rgba(0,0,0,0.2); }
     video { width: 100%; display: block; }
-    canvas { display: none; } /* 隱藏拍照用的畫布 */
-    #status { margin-top: 20px; padding: 15px; font-weight: bold; font-size: 1.1rem; text-align: center; background: #fff; border-radius: 50px; min-width: 280px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+    #status { margin-top: 20px; padding: 15px; font-weight: bold; font-size: 1.2rem; text-align: center; background: #fff; border-radius: 50px; min-width: 280px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
     #btn-group { display: none; margin-top: 20px; gap: 20px; }
-    .btn { padding: 15px 35px; border: none; border-radius: 12px; font-size: 1.3rem; font-weight: bold; color: #fff; cursor: pointer; }
+    .btn { padding: 15px 40px; border: none; border-radius: 12px; font-size: 1.5rem; font-weight: bold; color: #fff; cursor: pointer; transition: 0.2s; }
     .btn-on { background: #28a745; }
     .btn-off { background: #dc3545; }
+    .btn:active { transform: scale(0.95); }
   </style>
 </head>
 <body>
-  <h2 style="color: #1a73e8;">博瀚文理 - 考勤系統</h2>
+  <h2 style="color: #1a73e8;">博瀚文理 - 老師考勤機</h2>
   <div id="video-box"><video id="video" autoplay muted playsinline></video></div>
-  <canvas id="canvas"></canvas>
-  <div id="status">系統初始化...</div>
+  <div id="status">系統初始化中...</div>
   <div id="btn-group">
     <button class="btn btn-on" onclick="handlePunch('上班')">上班打卡</button>
     <button class="btn btn-off" onclick="handlePunch('下班')">下班打卡</button>
@@ -29,10 +28,9 @@
 
   <script>
     const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
     const status = document.getElementById('status');
     const btnGroup = document.getElementById('btn-group');
-    const GAS_URL = 'https://script.google.com/macros/s/AKfycbxXKT00MyBKrusNHEPuQoUSSWHkddi9QpKYOOcuFqiYNG5x9cLjg0546yzJX24WuRGcug/exec'; 
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbwcjePZkyD7vKeUrooJgpatsOLojfe6ISRO99JpCg8QLH2P5Y08g4LhPikrHg1Z_sRAYw/exec'; 
     const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
     let faceMatcher = null, currentTeacher = "", isBusy = false;
 
@@ -49,7 +47,7 @@
         video.srcObject = stream;
         status.innerText = '請對準臉部進行辨識';
         detect();
-      } catch (e) { status.innerText = '載入錯誤'; }
+      } catch (e) { status.innerText = '載入錯誤，請重新整理'; }
     }
 
     async function detect() {
@@ -69,18 +67,12 @@
     }
 
     async function handlePunch(type) {
-      status.innerText = '正在上傳照片與紀錄...';
+      status.innerText = '傳送紀錄中...';
       btnGroup.style.display = 'none';
-
-      // 拍照並縮小圖片以節省空間
-      canvas.width = 400; canvas.height = 300;
-      canvas.getContext('2d').drawImage(video, 0, 0, 400, 300);
-      const imageData = canvas.toDataURL('image/jpeg', 0.5); // 50% 品質
-
       try {
         const res = await fetch(GAS_URL, { 
           method: 'POST', 
-          body: JSON.stringify({ action: "checkin", name: currentTeacher, type: type, image: imageData }) 
+          body: JSON.stringify({ action: "checkin", name: currentTeacher, type: type }) 
         });
         const result = await res.json();
         status.innerText = result.message;
