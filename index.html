@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>博瀚考勤系統 - 極速版</title>
-  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.js"></script>
+  <script src="https://cdn.jsdelivr.net/npㄇm/@vladmandic/face-api@1.7.12/dist/face-api.js"></script>
   <style>
     body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f4f8; margin: 0; padding: 10px; }
     #video-box { width: 100%; max-width: 360px; border-radius: 15px; overflow: hidden; background: #000; }
@@ -40,7 +40,7 @@
         const res = await fetch(GAS_URL);
         const data = await res.json();
         const labeled = data.map(m => new faceapi.LabeledFaceDescriptors(m.name, [new Float32Array(m.descriptor)]));
-        faceMatcher = new faceapi.FaceMatcher(labeled, 0.55);
+        faceMatcher = new faceapi.FaceMatcher(labeled, 0.6);
         const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 320, height: 240, facingMode: "user" } });
         video.srcObject = stream;
         status.innerText = '請對準臉部';
