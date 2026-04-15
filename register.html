@@ -2,42 +2,33 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>老師資料註冊</title>
+  <title>老師註冊</title>
   <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.js"></script>
-  <style>
-    body { font-family: sans-serif; text-align: center; padding: 20px; }
-    #video-box { width: 100%; max-width: 400px; margin: auto; border-radius: 15px; overflow: hidden; background: #000; }
-    video { width: 100%; display: block; }
-    input { padding: 12px; margin: 15px; width: 200px; }
-    button { padding: 12px 25px; background: #007bff; color: #fff; border: none; border-radius: 8px; }
-  </style>
 </head>
-<body>
+<body style="text-align: center; font-family: sans-serif; padding: 20px;">
   <h2>老師臉部註冊</h2>
-  <div id="video-box"><video id="video" autoplay muted playsinline></video></div>
-  <input type="text" id="name" placeholder="請輸入老師姓名"><br>
-  <button onclick="reg()">擷取並註冊</button>
-  <div id="msg">載入中...</div>
+  <video id="video" autoplay muted playsinline style="width: 100%; max-width: 400px; border-radius: 10px;"></video><br>
+  <input type="text" id="name" placeholder="請輸入姓名" style="padding: 10px; margin: 10px; width: 200px;"><br>
+  <button onclick="reg()" style="padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 5px;">擷取並註冊</button>
+  <p id="msg">載入中...</p>
   <script>
-    const video = document.getElementById('video');
-    const msg = document.getElementById('msg');
-    const GAS_URL = 'https://script.google.com/macros/s/AKfycbxXKT00MyBKrusNHEPuQoUSSWHkddi9QpKYOOcuFqiYNG5x9cLjg0546yzJX24WuRGcug/exec'; 
-    const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbwcjePZkyD7vKeUrooJgpatsOLojfe6ISRO99JpCg8QLH2P5Y08g4LhPikrHg1Z_sRAYw/exec';
     async function init() {
-      await faceapi.nets.tinyFaceDetector.load(MODEL_URL);
-      await faceapi.nets.faceLandmark68Net.load(MODEL_URL);
-      await faceapi.nets.faceRecognitionNet.load(MODEL_URL);
-      const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
-      video.srcObject = stream;
-      msg.innerText = '系統就緒';
+      const url = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+      await faceapi.nets.tinyFaceDetector.load(url);
+      await faceapi.nets.faceLandmark68Net.load(url);
+      await faceapi.nets.faceRecognitionNet.load(url);
+      const s = await navigator.mediaDevices.getUserMedia({ video: {} });
+      document.getElementById('video').srcObject = s;
+      document.getElementById('msg').innerText = '系統就緒';
     }
     async function reg() {
-      const name = document.getElementById('name').value;
-      if (!name) return alert("請輸入姓名");
-      const dec = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
-      if (!dec) return alert("找不到人臉");
-      fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ action: "register", name: name, descriptor: Array.from(dec.descriptor) }) });
-      msg.innerText = name + ' 註冊指令已送出';
+      const n = document.getElementById('name').value;
+      if (!n) return alert("請輸入姓名");
+      const d = await faceapi.detectSingleFace(document.getElementById('video'), new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
+      if (!d) return alert("找不到臉");
+      fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ action: "register", name: n, descriptor: Array.from(d.descriptor) }) });
+      document.getElementById('msg').innerText = n + ' 已送出註冊';
     }
     init();
   </script>
