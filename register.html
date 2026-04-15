@@ -2,56 +2,103 @@
 <html lang="zh-TW">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>博瀚文理 - 學生註冊</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>博瀚文理 - 老師註冊系統</title>
   <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.js"></script>
   <style>
-    body { font-family: sans-serif; text-align: center; padding: 20px; background: #eef2f5; }
-    #video-box { width: 100%; max-width: 400px; margin: auto; border-radius: 15px; overflow: hidden; background: #000; }
+    body { font-family: "Microsoft JhengHei", sans-serif; text-align: center; padding: 20px; background: #eef2f5; margin: 0; }
+    #video-box { width: 100%; max-width: 400px; margin: 20px auto; border-radius: 15px; overflow: hidden; background: #000; box-shadow: 0 8px 20px rgba(0,0,0,0.2); }
     video { width: 100%; display: block; }
-    input { padding: 12px; font-size: 16px; width: 80%; max-width: 250px; margin: 20px 0; border-radius: 8px; border: 1px solid #ccc; }
-    button { padding: 12px 25px; font-size: 16px; background: #28a745; color: white; border: none; border-radius: 8px; cursor: pointer; }
-    #msg { margin-top: 15px; font-weight: bold; color: #555; }
+    input { padding: 12px; font-size: 16px; width: 80%; max-width: 250px; margin: 10px; border-radius: 8px; border: 1px solid #ccc; outline: none; }
+    button { padding: 12px 25px; font-size: 1.1rem; background: #007bff; color: white; border: none; border-radius: 8px; cursor: pointer; transition: 0.3s; font-weight: bold; }
+    button:active { transform: scale(0.95); }
+    #msg { margin-top: 15px; font-weight: bold; color: #555; padding: 10px; }
+    .success { color: #28a745; }
+    .error { color: #dc3545; }
   </style>
 </head>
 <body>
-  <h2>新增學生臉部資料</h2>
-  <div id="video-box"><video id="video" autoplay muted playsinline></video></div>
-  <input type="text" id="userName" placeholder="輸入學生姓名">
+
+  <h2 style="color: #1a73e8;">新增老師臉部資料</h2>
+  
+  <div id="video-box">
+    <video id="video" autoplay muted playsinline></video>
+  </div>
+
+  <input type="text" id="userName" placeholder="請輸入老師姓名">
   <br>
-  <button onclick="registerFace()">擷取臉部特徵</button>
-  <div id="msg">載入模型中...</div>
+  <button onclick="registerFace()">擷取臉部特徵並註冊</button>
+  
+  <div id="msg">正在啟動系統...</div>
 
   <script>
     const video = document.getElementById('video');
     const msg = document.getElementById('msg');
-    const GAS_URL = 'https://script.google.com/macros/s/AKfycbyl1RP4DAE5GhamTdPJkaAiRlqikNsL3Y2v4m1FEWh26yL13r6AnNAMBCevw3jAqULTQA/exec'; 
+    
+    // --- 請填入您最新的 GAS 部署網址 ---
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbz4i1WfbX3s1l66e-bDi4BBibFgfeBuSD1cPlJ4pL3QcBGa42rRXv7acC83DaEwcWNRSA/exec'; 
     const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
 
     async function init() {
-      await faceapi.nets.tinyFaceDetector.load(MODEL_URL);
-      await faceapi.nets.faceLandmark68Net.load(MODEL_URL);
-      await faceapi.nets.faceRecognitionNet.load(MODEL_URL);
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
-      video.srcObject = stream;
-      msg.innerText = '請輸入姓名後按按鈕';
+      try {
+        await faceapi.nets.tinyFaceDetector.load(MODEL_URL);
+        await faceapi.nets.faceLandmark68Net.load(MODEL_URL);
+        await faceapi.nets.faceRecognitionNet.load(MODEL_URL);
+        
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { facingMode: "user" } 
+        });
+        video.srcObject = stream;
+        msg.innerText = '系統就緒，請輸入姓名後按註冊';
+      } catch (e) {
+        msg.innerText = '啟動失敗，請確認是否使用 Safari 並允許鏡頭權限';
+        msg.className = 'error';
+      }
     }
 
     async function registerFace() {
-      const name = document.getElementById('userName').value;
-      if (!name) { alert("請填寫姓名"); return; }
-      msg.innerText = '偵測中...請保持不動';
-      const det = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
-      if (!det) { msg.innerText = '抓不到臉部，請靠近一點'; return; }
+      const name = document.getElementById('userName').value.trim();
+      if (!name) { alert("請先輸入姓名！"); return; }
+      
+      msg.innerText = '正在擷取特徵，請保持不動...';
+      msg.className = '';
 
-      fetch(GAS_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        body: JSON.stringify({ action: "register", name: name, descriptor: Array.from(det.descriptor) })
-      });
-      msg.innerText = name + ' 註冊成功！請至試算表確認。';
-      document.getElementById('userName').value = "";
+      // 擷取臉部特徵值
+      const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+                                    .withFaceLandmarks()
+                                    .withFaceDescriptor();
+      
+      if (!detection) {
+        msg.innerText = '偵測不到人臉，請靠近一點或確保光線充足';
+        msg.className = 'error';
+        return;
+      }
+
+      // 準備傳送給 GAS 的資料包
+      const payload = {
+        action: "register", // 對應後端的判斷邏輯
+        name: name,
+        descriptor: Array.from(detection.descriptor) // 特徵值轉為一般陣列
+      };
+
+      try {
+        // 使用 POST 傳送
+        await fetch(GAS_URL, {
+          method: 'POST',
+          mode: 'no-cors', // 處理跨網域問題
+          body: JSON.stringify(payload)
+        });
+
+        msg.innerText = '【' + name + '】註冊指令已送出！請檢查試算表 Members 分頁。';
+        msg.className = 'success';
+        document.getElementById('userName').value = ""; // 清空輸入框
+      } catch (err) {
+        msg.innerText = '傳送失敗：' + err.message;
+        msg.className = 'error';
+      }
     }
+
+    // 啟動
     init();
   </script>
 </body>
