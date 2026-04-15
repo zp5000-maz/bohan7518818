@@ -6,86 +6,71 @@
   <title>博瀚文理 - 打卡系統</title>
   <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.js"></script>
   <style>
-    body { font-family: "Microsoft JhengHei", sans-serif; display: flex; flex-direction: column; align-items: center; background-color: #f0f4f8; margin: 0; padding: 20px; }
-    #video-box { position: relative; width: 100%; max-width: 400px; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.2); background: #000; }
+    body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; background-color: #f0f4f8; margin: 0; padding: 20px; }
+    #video-box { position: relative; width: 100%; max-width: 450px; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.2); background: #000; }
     video { width: 100%; display: block; }
-    #status { margin-top: 20px; padding: 15px 30px; background: white; border-radius: 50px; font-weight: bold; color: #333; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
+    #status { margin-top: 20px; padding: 15px 30px; background: white; border-radius: 50px; font-weight: bold; font-size: 1.2rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; min-width: 200px; }
+    .success { color: #1e8e3e; background: #e6f4ea !important; }
   </style>
 </head>
 <body>
-
-  <h2 style="color: #1a73e8;">博瀚文理 - 打卡系統</h2>
-  
-  <div id="video-box">
-    <video id="video" autoplay muted playsinline></video>
-  </div>
-
-  <div id="status">準備中，請稍候...</div>
+  <h2 style="color: #1a73e8;">博瀚文理 - AI 打卡機</h2>
+  <div id="video-box"><video id="video" autoplay muted playsinline></video></div>
+  <div id="status">載入中...</div>
 
   <script>
     const video = document.getElementById('video');
     const status = document.getElementById('status');
-    const GAS_URL = 'https://script.google.com/macros/s/AKfycbyXuZGpHgePe47vGm7R6h2s6yjy3PrSdaQ2-PlmaPa5Iq4Lp1x22M_fOJNmW2v_hIIg_w/exec'; 
-    // 更換模型路徑到官方穩定源
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbyl1RP4DAE5GhamTdPJkaAiRlqikNsL3Y2v4m1FEWh26yL13r6AnNAMBCevw3jAqULTQA/exec'; 
     const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+    let faceMatcher = null;
 
     async function init() {
       try {
         status.innerText = '正在下載 AI 模型...';
-        
-        // 分段載入
         await faceapi.nets.tinyFaceDetector.load(MODEL_URL);
         await faceapi.nets.faceLandmark68Net.load(MODEL_URL);
         await faceapi.nets.faceRecognitionNet.load(MODEL_URL);
         
-        status.innerText = '載入完成，啟動鏡頭...';
+        status.innerText = '正在更新學生名單...';
+        await loadMemberData();
         startCamera();
-      } catch (e) {
-        status.innerText = '載入失敗，請務必使用 Safari 開啟';
-        console.error(e);
-      }
+      } catch (e) { status.innerText = '系統初始化失敗'; }
+    }
+
+    async function loadMemberData() {
+      try {
+        const response = await fetch(GAS_URL);
+        const data = await response.json();
+        if (data.length === 0) { status.innerText = '請先去註冊學生'; return; }
+        const labeled = data.map(m => new faceapi.LabeledFaceDescriptors(m.name, [new Float32Array(m.descriptor)]));
+        faceMatcher = new faceapi.FaceMatcher(labeled, 0.55); // 0.55 為嚴謹度
+        status.innerText = '已就緒，請對準臉部';
+      } catch (e) { status.innerText = '名單載入失敗'; }
     }
 
     async function startCamera() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { facingMode: "user" } 
-        });
-        video.srcObject = stream;
-        video.onloadedmetadata = () => {
-          video.play();
-          status.innerText = '系統運作中，請對準臉部';
-          detect();
-        };
-      } catch (err) {
-        status.innerText = '鏡頭開啟失敗，請允許攝影機權限';
-      }
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+      video.srcObject = stream;
+      video.onloadedmetadata = () => { video.play(); detect(); };
     }
 
     async function detect() {
-      const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions());
+      if (!faceMatcher) return;
+      const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
       if (detection) {
-        status.innerText = '辨識成功，連線中...';
-        await sendToGas("測試人員");
-        await new Promise(r => setTimeout(r, 8000)); // 冷卻時間
-        status.innerText = '請對準臉部進行辨識';
+        const match = faceMatcher.findBestMatch(detection.descriptor);
+        if (match.label !== 'unknown') {
+          status.innerText = '你好，' + match.label + '！打卡中...';
+          status.classList.add('success');
+          await fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ action: "checkin", name: match.label }) });
+          await new Promise(r => setTimeout(r, 8000)); // 冷卻
+          status.classList.remove('success');
+          status.innerText = '請對準臉部進行辨識';
+        }
       }
       requestAnimationFrame(detect);
     }
-
-    async function sendToGas(userName) {
-      try {
-        fetch(GAS_URL, {
-          method: 'POST',
-          mode: 'no-cors',
-          body: JSON.stringify({ name: userName })
-        });
-        status.innerText = userName + ' 打卡已傳送';
-      } catch (e) {
-        console.log("傳送完成");
-      }
-    }
-
     init();
   </script>
 </body>
