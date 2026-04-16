@@ -2,42 +2,52 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>老師註冊</title>
+  <title>老師人臉註冊 - 博瀚文理</title>
   <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.js"></script>
   <style>
-    body { font-family: sans-serif; text-align: center; padding: 20px; }
-    #video-box { width: 100%; max-width: 400px; margin: auto; border-radius: 15px; overflow: hidden; background: #000; }
-    video { width: 100%; display: block; }
-    input { padding: 12px; margin: 15px; width: 200px; }
-    button { padding: 12px 25px; background: #007bff; color: #fff; border: none; cursor: pointer; }
+    body { font-family: sans-serif; text-align: center; background: #f0f2f5; padding-top: 50px; }
+    #video-box { position: relative; width: 400px; margin: auto; border: 5px solid #fff; border-radius: 10px; overflow: hidden; }
+    video { width: 400px; transform: scaleX(-1); }
+    input { padding: 10px; width: 200px; margin: 20px 0; border: 1px solid #ccc; border-radius: 5px; }
+    button { padding: 10px 30px; background: #1a73e8; color: white; border: none; border-radius: 5px; cursor: pointer; }
+    #msg { margin-top: 20px; color: blue; font-weight: bold; }
   </style>
 </head>
 <body>
   <h2>人臉資料錄入</h2>
   <div id="video-box"><video id="video" autoplay muted playsinline></video></div>
-  <input type="text" id="name" placeholder="請輸入姓名"><br>
-  <button onclick="reg()">儲存特徵</button>
-  <div id="msg">載入中...</div>
+  <input type="text" id="name" placeholder="請輸入老師姓名"><br>
+  <button onclick="register()">儲存人臉特徵</button>
+  <div id="msg">系統準備中...</div>
+
   <script>
-    const video = document.getElementById('video');
-    const msg = document.getElementById('msg');
-    const GAS_URL = 'https://script.google.com/macros/s/AKfycbxDU76O8sB-PqxL64CHxbDBwvHi4Kyf9mu1qlp0_Mdk5DYHKhb5tFN9raVs5NqV6uz47w/exec'; 
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbxnxDNs5iFs7Bb-2qrp-dYnt6KGpVLLgJo9FSKd77P77pHoRUBqALZqAYgWCbgoF2cxlQ/exec'; 
     const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+    const video = document.getElementById('video');
+
     async function init() {
       await faceapi.nets.tinyFaceDetector.load(MODEL_URL);
       await faceapi.nets.faceLandmark68Net.load(MODEL_URL);
       await faceapi.nets.faceRecognitionNet.load(MODEL_URL);
       const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
       video.srcObject = stream;
-      msg.innerText = '就緒';
+      document.getElementById('msg').innerText = '系統就緒，請輸入姓名後按儲存';
     }
-    async function reg() {
+
+    async function register() {
       const name = document.getElementById('name').value;
       if (!name) return alert("請輸入姓名");
+      document.getElementById('msg').innerText = '正在擷取特徵...';
+      
       const dec = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks().withFaceDescriptor();
-      if (!dec) return alert("找不到臉");
-      fetch(GAS_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify({ action: "register", name: name, descriptor: Array.from(dec.descriptor) }) });
-      msg.innerText = '已註冊 ' + name;
+      if (!dec) return alert("偵測不到臉部，請靠近鏡頭並確保光線充足");
+
+      await fetch(GAS_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        body: JSON.stringify({ action: "register", name: name, descriptor: Array.from(dec.descriptor) })
+      });
+      document.getElementById('msg').innerText = name + ' 的特徵已傳送，可繼續錄入下個角度';
     }
     init();
   </script>
