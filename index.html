@@ -1,28 +1,29 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html>
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>博瀚考勤 - 極速穩定版</title>
+  <title>博瀚文理 - AI 辨識系統</title>
   <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.js"></script>
   <style>
-    body { font-family: -apple-system, sans-serif; display: flex; flex-direction: column; align-items: center; background: #f0f4f8; margin: 0; padding: 15px; }
-    #video-box { position: relative; width: 100%; max-width: 320px; border-radius: 20px; overflow: hidden; background: #000; border: 4px solid #fff; }
-    video { width: 100%; transform: scaleX(-1); display: block; }
-    #status { margin-top: 20px; padding: 15px; font-weight: bold; text-align: center; background: #fff; border-radius: 30px; width: 80%; box-shadow: 0 4px 10px rgba(0,0,0,0.1); font-size: 1.1rem; }
-    #btn-group { display: none; margin-top: 25px; gap: 20px; }
-    .btn { padding: 18px 45px; border: none; border-radius: 15px; font-size: 1.4rem; font-weight: bold; color: #fff; box-shadow: 0 4px 6px rgba(0,0,0,0.2); }
-    .btn-on { background: #2ecc71; } .btn-off { background: #e74c3c; }
-    #loading-dot { position: absolute; top: 10px; right: 10px; width: 10px; height: 10px; background: #3498db; border-radius: 50%; display: none; }
+    body { font-family: "Microsoft JhengHei", sans-serif; background: #2c3e50; color: white; display: flex; flex-direction: column; align-items: center; padding: 20px; }
+    #video-box { position: relative; border: 10px solid #34495e; border-radius: 20px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    video { width: 640px; height: 480px; transform: scaleX(-1); background: #000; }
+    canvas { position: absolute; top: 0; left: 0; transform: scaleX(-1); }
+    #status { margin-top: 20px; font-size: 24px; font-weight: bold; min-height: 40px; }
+    #btn-group { display: none; gap: 20px; margin-top: 20px; }
+    .btn { padding: 15px 50px; border: none; border-radius: 10px; font-size: 20px; font-weight: bold; cursor: pointer; transition: 0.3s; }
+    .btn-on { background: #27ae60; color: white; }
+    .btn-off { background: #e74c3c; color: white; }
+    .btn:hover { transform: translateY(-3px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
   </style>
 </head>
 <body>
-  <h2 style="color: #2c3e50; margin-bottom: 5px;">博瀚文理</h2>
+  <h1>博瀚文理 AI 考勤</h1>
   <div id="video-box">
     <video id="video" autoplay muted playsinline></video>
-    <div id="loading-dot"></div>
+    <canvas id="overlay"></canvas>
   </div>
-  <div id="status">系統準備中...</div>
+  <div id="status">模型讀取中...</div>
   <div id="btn-group">
     <button class="btn btn-on" onclick="handlePunch('上班')">上班</button>
     <button class="btn btn-off" onclick="handlePunch('下班')">下班</button>
@@ -32,100 +33,58 @@
     const video = document.getElementById('video');
     const status = document.getElementById('status');
     const btnGroup = document.getElementById('btn-group');
-    const dot = document.getElementById('loading-dot');
-    
-    // 請替換您的 GAS URL
-    const GAS_URL = 'https://script.google.com/macros/s/AKfycbzCWc_RXUpHw5iQvKdJtDeVIk-2nWtY10I5GBz0sVYeegVQDPKp04YDf7MzUCl4JYfyCg/exec'; 
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbxDU76O8sB-PqxL64CHxbDBwvHi4Kyf9mu1qlp0_Mdk5DYHKhb5tFN9raVs5NqV6uz47w/exec'; 
     const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
-    
     let faceMatcher = null, currentTeacher = "", isBusy = false;
 
     async function init() {
       try {
-        status.innerText = '讀取模型中...';
-        // 同時加載三個核心模型
         await Promise.all([
-          faceapi.nets.tinyFaceDetector.load(MODEL_URL),
+          faceapi.nets.ssdMobilenetv1.load(MODEL_URL), // 筆電建議用高精度模型
           faceapi.nets.faceLandmark68Net.load(MODEL_URL),
           faceapi.nets.faceRecognitionNet.load(MODEL_URL)
         ]);
-        
-        status.innerText = '讀取名單中...';
-        const res = await fetch(GAS_URL + "?nocache=" + Date.now());
+        const res = await fetch(GAS_URL);
         const data = await res.json();
-        
-        if (!data || data.length === 0) {
-          status.innerText = '錯誤：名單為空，請先註冊';
-          return;
-        }
-
         const labeled = data.map(m => new faceapi.LabeledFaceDescriptors(m.name, [new Float32Array(m.descriptor)]));
-        // 嚴格度設定為 0.7，對於 iPhone 7 較為友善
-        faceMatcher = new faceapi.FaceMatcher(labeled, 0.7);
-        
-        status.innerText = '開啟相機中...';
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { width: 320, height: 240, facingMode: "user" } 
-        });
+        faceMatcher = new faceapi.FaceMatcher(labeled, 0.6); // 筆電可以更精確
+        const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
         video.srcObject = stream;
-        
         status.innerText = '請正對鏡頭';
         detect();
-      } catch (e) { 
-        status.innerText = '啟動失敗，請重新載入';
-        console.error(e);
-      }
+      } catch (e) { status.innerText = '初始化失敗，請檢查名單與權限'; }
     }
 
     async function detect() {
       if (isBusy) return;
-      
-      dot.style.display = 'block'; // 顯示 AI 正在運作
-
-      // 極速配置：縮小偵測範圍與降低閾值
-      const dec = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.4 }))
-                                    .withFaceLandmarks()
-                                    .withFaceDescriptor();
-      
-      dot.style.display = 'none';
-
+      // 筆電效能好，改用高精度偵測器
+      const dec = await faceapi.detectSingleFace(video).withFaceLandmarks().withFaceDescriptor();
       if (dec && faceMatcher) {
         const match = faceMatcher.findBestMatch(dec.descriptor);
         if (match.label !== 'unknown') {
           currentTeacher = match.label;
-          status.innerText = '老師：' + currentTeacher;
+          status.innerText = '老師您好：' + currentTeacher;
+          status.style.color = "#2ecc71";
           btnGroup.style.display = 'flex';
-          isBusy = true; // 停止偵測，等待按鈕點擊
+          isBusy = true;
           return;
         }
       }
-      
-      // 增加偵測間隔至 500ms，防止 iPhone 7 過熱降頻
-      setTimeout(detect, 500);
+      setTimeout(detect, 200);
     }
 
     async function handlePunch(type) {
-      status.innerText = '紀錄傳送中...';
+      status.innerText = '正在紀錄...';
       btnGroup.style.display = 'none';
-      
-      try {
-        await fetch(GAS_URL, { 
-          method: 'POST', 
-          body: JSON.stringify({ action: "checkin", name: currentTeacher, type: type }) 
-        });
-        status.innerText = '打卡完成！';
-      } catch (e) { 
-        status.innerText = '傳送成功'; 
-      }
-      
-      // 5 秒後重啟辨識
+      await fetch(GAS_URL, { method: 'POST', body: JSON.stringify({ action: "checkin", name: currentTeacher, type: type }) });
+      status.innerText = currentTeacher + ' ' + type + '成功！';
       setTimeout(() => { 
-        status.innerText = '請對準臉部'; 
+        status.innerText = '請正對鏡頭'; 
+        status.style.color = "white";
         isBusy = false; 
         detect(); 
-      }, 5000);
+      }, 3000);
     }
-
     init();
   </script>
 </body>
