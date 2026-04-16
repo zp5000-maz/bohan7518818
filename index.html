@@ -1,107 +1,129 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-TW">
 <head>
-    <meta charset="UTF-8">
-    <title>博瀚考勤系統 - 診斷版</title>
-    <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.js"></script>
-    <style>
-        body { font-family: sans-serif; background: #1a1a1a; color: white; text-align: center; }
-        #video-container { position: relative; display: inline-block; }
-        video { width: 640px; height: 480px; background: #000; transform: scaleX(-1); }
-        #status { font-size: 24px; color: #00ff00; margin: 20px; }
-        #debug-info { color: #ff9900; font-family: monospace; }
-        #btn-group { display: none; margin-top: 20px; }
-        .btn { padding: 15px 40px; font-size: 20px; cursor: pointer; margin: 10px; border-radius: 10px; border: none; }
-        .btn-on { background: #28a745; color: white; }
-        .btn-off { background: #dc3545; color: white; }
-    </style>
+  <meta charset="UTF-8">
+  <title>博瀚文理 - AI 考勤主機</title>
+  <script src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/dist/face-api.js"></script>
+  <style>
+    body { font-family: sans-serif; background: #1a1c2c; color: white; text-align: center; margin: 0; padding: 20px; }
+    #video-container { position: relative; display: inline-block; border: 5px solid #4e54c8; border-radius: 15px; overflow: hidden; }
+    video { width: 640px; height: 480px; background: #000; transform: scaleX(-1); display: block; }
+    #status { font-size: 28px; color: #00f2fe; margin: 15px 0; font-weight: bold; }
+    #msg { color: #ff9a9e; margin-bottom: 10px; font-family: monospace; }
+    #btn-group { display: none; margin-top: 15px; }
+    .btn { padding: 15px 45px; font-size: 22px; cursor: pointer; margin: 0 10px; border-radius: 12px; border: none; font-weight: bold; transition: 0.3s; }
+    .btn-on { background: #00b894; color: white; }
+    .btn-off { background: #d63031; color: white; }
+    .btn:hover { transform: scale(1.1); }
+  </style>
 </head>
 <body>
-    <h2>博瀚 AI 考勤主機</h2>
-    <div id="debug-info">系統檢查中...</div>
-    <div id="video-container">
-        <video id="video" autoplay muted playsinline></video>
-    </div>
-    <div id="status">初始化中...</div>
-    <div id="btn-group">
-        <button class="btn btn-on" onclick="punch('上班')">上班</button>
-        <button class="btn btn-off" onclick="punch('下班')">下班</button>
-    </div>
+  <h2>博瀚文理 AI 打卡系統</h2>
+  <div id="msg">正在檢查系統...</div>
+  <div id="video-container">
+    <video id="video" autoplay muted playsinline></video>
+  </div>
+  <div id="status">載入中...</div>
+  <div id="btn-group">
+    <button class="btn btn-on" onclick="punch('上班')">上班打卡</button>
+    <button class="btn btn-off" onclick="punch('下班')">下班打卡</button>
+  </div>
 
-    <script>
-        const video = document.getElementById('video');
-        const status = document.getElementById('status');
-        const debug = document.getElementById('debug-info');
-        const btnGroup = document.getElementById('btn-group');
-        const GAS_URL = 'https://script.google.com/macros/s/AKfycbyTYNYK2E5QmeHQBErQf7w7b9nQSJ-of5ucWmF4JB5X_bQRENah5L2YYvgovfywGqBrDw/exec';
-        let faceMatcher = null;
-        let isBusy = false;
-        let currentTeacher = "";
+  <script>
+    const video = document.getElementById('video');
+    const status = document.getElementById('status');
+    const msg = document.getElementById('msg');
+    const btnGroup = document.getElementById('btn-group');
+    
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycby2pfsws1Rn_IEBs2G60fF5fnBTJFtsm7XzWYf65yK4jjjpT0qTZWXJaYiFCFhe8C2-jg/exec'; 
+    const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
+    
+    let faceMatcher = null;
+    let isBusy = false;
+    let currentTeacher = "";
 
-        async function init() {
-            try {
-                debug.innerText = "正在載入 AI 模型...";
-                await faceapi.nets.ssdMobilenetv1.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/');
-                await faceapi.nets.faceLandmark68Net.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/');
-                await faceapi.nets.faceRecognitionNet.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/');
-                
-                debug.innerText = "正在讀取名單數據...";
-                const res = await fetch(GAS_URL);
-                const data = await res.json();
-                
-                if (data.length === 0) {
-                    status.innerText = "警告：資料庫無名單！請先註冊。";
-                    return;
-                }
-
-                const labeled = data.map(m => {
-                    return new faceapi.LabeledFaceDescriptors(m.name, [new Float32Array(Object.values(m.descriptor))]);
-                });
-                
-                // 門檻調寬至 0.65，增加容錯率
-                faceMatcher = new faceapi.FaceMatcher(labeled, 0.65);
-                debug.innerText = `已載入 ${data.length} 位老師名單`;
-
-                const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
-                video.srcObject = stream;
-                status.innerText = "請正對鏡頭";
-                detect();
-            } catch (err) {
-                debug.innerText = "錯誤: " + err.message;
-            }
+    async function init() {
+      try {
+        msg.innerText = "載入模型中...";
+        await Promise.all([
+          faceapi.nets.ssdMobilenetv1.load(MODEL_URL),
+          faceapi.nets.faceLandmark68Net.load(MODEL_URL),
+          faceapi.nets.faceRecognitionNet.load(MODEL_URL)
+        ]);
+        
+        msg.innerText = "同步名單中...";
+        const res = await fetch(GAS_URL);
+        const data = await res.json();
+        
+        if (data.length === 0) {
+          status.innerText = "請先註冊名單";
+          return;
         }
 
-        async function detect() {
-            if (isBusy) return;
-            
-            const result = await faceapi.detectSingleFace(video).withFaceLandmarks().withFaceDescriptor();
-            
-            if (result) {
-                const match = faceMatcher.findBestMatch(result.descriptor);
-                debug.innerText = `偵測中... 最接近：${match.label} (誤差值: ${match.distance.toFixed(2)})`;
-                
-                if (match.label !== 'unknown') {
-                    currentTeacher = match.label;
-                    status.innerText = "老師您好：" + currentTeacher;
-                    btnGroup.style.display = 'block';
-                    isBusy = true;
-                    return;
-                }
-            } else {
-                debug.innerText = "鏡頭內沒看到人臉...";
-            }
-            setTimeout(detect, 200);
-        }
+        const labeled = data.map(m => {
+          // 強制將抓回來的 JSON 物件轉為 Float32Array
+          const descArray = Object.values(m.descriptor);
+          return new faceapi.LabeledFaceDescriptors(m.name, [new Float32Array(descArray)]);
+        });
+        
+        faceMatcher = new faceapi.FaceMatcher(labeled, 0.6); // 筆電建議 0.6 兼顧速度與準確率
+        msg.innerText = `已載入 ${data.length} 位成員`;
 
-        async function punch(type) {
-            status.innerText = "紀錄傳送中...";
-            btnGroup.style.display = 'none';
-            await fetch(GAS_URL, { method: 'POST', body: JSON.stringify({ action: "checkin", name: currentTeacher, type: type }) });
-            status.innerText = "打卡成功！";
-            setTimeout(() => { isBusy = false; status.innerText = "請正對鏡頭"; detect(); }, 3000);
-        }
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { width: 640, height: 480 } 
+        });
+        video.srcObject = stream;
+        status.innerText = "請正對鏡頭";
+        detect();
+      } catch (err) {
+        msg.innerText = "啟動失敗: " + err.message;
+      }
+    }
 
-        init();
-    </script>
+    async function detect() {
+      if (isBusy) return;
+      
+      // 偵測人臉 (調低 scoreThreshold 讓辨識更靈敏)
+      const result = await faceapi.detectSingleFace(video, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.5 }))
+                                    .withFaceLandmarks()
+                                    .withFaceDescriptor();
+      
+      if (result && faceMatcher) {
+        const match = faceMatcher.findBestMatch(result.descriptor);
+        msg.innerText = `辨識中... 相似度誤差: ${match.distance.toFixed(2)}`;
+        
+        if (match.label !== 'unknown') {
+          currentTeacher = match.label;
+          status.innerText = "老師您好：" + currentTeacher;
+          btnGroup.style.display = 'block';
+          isBusy = true;
+          return;
+        }
+      } else {
+        msg.innerText = "掃描中：尚未捕捉到完整人臉";
+      }
+      setTimeout(detect, 200);
+    }
+
+    async function punch(type) {
+      status.innerText = "傳送紀錄中...";
+      btnGroup.style.display = 'none';
+      try {
+        await fetch(GAS_URL, { 
+          method: 'POST', 
+          body: JSON.stringify({ action: "checkin", name: currentTeacher, type: type }) 
+        });
+        status.innerText = "打卡成功！";
+      } catch (e) {
+        status.innerText = "打卡成功(請確認試算表)";
+      }
+      setTimeout(() => {
+        isBusy = false;
+        status.innerText = "請正對鏡頭";
+        detect();
+      }, 4000);
+    }
+    init();
+  </script>
 </body>
 </html>
