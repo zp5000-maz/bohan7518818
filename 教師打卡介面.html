@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>博瀚文理 - AI 人臉辨識打卡</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; background-color: #f0f0f0; padding: 20px; }
+        #鏡頭區域 { position: relative; display: inline-block; width: 100%; max-width: 400px; }
+        video { width: 100%; border-radius: 10px; border: 5px solid #333; }
+        canvas { position: absolute; top: 0; left: 0; }
+        .按鈕群組 { margin-top: 20px; }
+        button { padding: 15px 30px; font-size: 18px; cursor: pointer; border-radius: 5px; border: none; margin: 5px; }
+        #上班 { background-color: #28a745; color: white; }
+        #下班 { background-color: #dc3545; color: white; }
+        #訊息回傳 { margin-top: 20px; font-weight: bold; color: #0056b3; }
+    </style>
+</head>
+<body>
+
+    <h2>博瀚文理補習班</h2>
+    <p>請將臉部對準方框進行辨識</p>
+
+    <div id="鏡頭區域">
+        <video id="鏡頭畫面" autoplay muted playsinline></video>
+    </div>
+
+    <div class="按鈕群組">
+        <button id="上班">老師上班</button>
+        <button id="下班">老師下班</button>
+    </div>
+
+    <div id="訊息回傳">系統載入中...</div>
+
+    <script>
+        const 影片 = document.getElementById('鏡頭畫面');
+        const 訊息 = document.getElementById('訊息回傳');
+        const 後台網址 = '你的後台網址'; // 這裡請貼上第一階段產生的 URL
+
+        // 1. 啟動手機鏡頭
+        async function 啟動鏡頭() {
+            try {
+                const 串流 = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+                影片.srcObject = 串流;
+                訊息.innerText = "系統已就緒，請對準鏡頭";
+            } catch (錯誤) {
+                訊息.innerText = "無法開啟鏡頭，請檢查權限";
+            }
+        }
+
+        // 2. 打卡執行邏輯
+        async function 執行打卡(動作類型) {
+            訊息.innerText = "正在進行辨識與檢核...";
+            
+            // 這裡模擬辨識到的教師姓名 (下一階段我們會整合臉部比對邏輯)
+            const 辨識結果 = {
+                name: "曾益慧", 
+                action: 動作類型,
+                confidence: "98%"
+            };
+
+            // 傳送到第一階段的 GAS 後端
+            fetch(後台網址, {
+                method: 'POST',
+                body: JSON.stringify(辨識結果)
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.狀態 === "成功") {
+                    alert(data.訊息);
+                } else {
+                    alert("【系統攔截】\n" + data.訊息);
+                }
+                訊息.innerText = data.訊息;
+            })
+            .catch(err => {
+                訊息.innerText = "連線失敗，請檢查網路";
+            });
+        }
+
+        document.getElementById('上班').addEventListener('click', () => 執行打卡('上班'));
+        document.getElementById('下班').addEventListener('click', () => 執行打卡('下班'));
+
+        啟動鏡頭();
+    </script>
+</body>
+</html>
