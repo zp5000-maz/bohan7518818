@@ -2,111 +2,140 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>博瀚文理 - AI 人臉辨識系統</title>
     <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
-        body { font-family: "Microsoft JhengHei", sans-serif; text-align: center; background-color: #1a1a1a; color: #ffeb3b; padding: 20px; }
-        #鏡頭區域 { position: relative; display: inline-block; width: 100%; max-width: 500px; border: 3px solid #ffeb3b; border-radius: 15px; overflow: hidden; }
-        video { width: 100%; display: block; }
-        canvas { position: absolute; top: 0; left: 0; }
-        .按鈕區 { margin-top: 25px; }
-        button { padding: 15px 40px; font-size: 20px; font-weight: bold; cursor: pointer; border-radius: 10px; border: none; margin: 10px; transition: 0.3s; }
-        #上班 { background-color: #4caf50; color: white; }
-        #下班 { background-color: #f44336; color: white; }
-        #狀態顯示 { margin-top: 20px; font-size: 1.2em; color: #ffffff; }
+        body { font-family: "Microsoft JhengHei", sans-serif; text-align: center; background-color: #1a1a1a; color: white; margin: 0; padding: 20px; overflow: hidden; }
+        h2 { color: #ffeb3b; margin-bottom: 20px; }
+        #提示訊息 { margin: 15px 0; font-size: 16px; color: #00d4ff; height: 24px; }
+        
+        #相機容器 { position: relative; width: 100%; max-width: 400px; margin: 0 auto; border: 3px solid #ffeb3b; border-radius: 15px; overflow: hidden; background: #000; }
+        video { width: 100%; display: block; transform: scaleX(-1); /* 鏡像顯示 */ }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; }
+
+        .按鈕區域 { margin-top: 30px; display: flex; flex-direction: column; align-items: center; gap: 15px; }
+        button { width: 80%; max-width: 300px; padding: 15px; font-size: 20px; font-weight: bold; border: none; border-radius: 10px; cursor: pointer; transition: 0.3s; }
+        .上班按鈕 { background-color: #4caf50; color: white; }
+        .下班按鈕 { background-color: #f44336; color: white; }
+        button:active { transform: scale(0.95); opacity: 0.8; }
+        
+        .讀取中 { color: #aaa; font-style: italic; }
     </style>
 </head>
 <body>
 
-    <h1>博瀚文理補習班</h1>
-    <div id="狀態顯示">系統初始化中，請稍候...</div>
+    <h2>博瀚文理補習班</h2>
+    <div id="提示訊息" class="讀取中">正在初始化 AI 模型...</div>
 
-    <div id="鏡頭區域">
-        <video id="鏡頭畫面" autoplay muted playsinline></video>
+    <div id="相機容器">
+        <video id="鏡頭" autoplay muted playsinline></video>
     </div>
 
-    <div class="按鈕區">
-        <button id="上班">老師上班</button>
-        <button id="下班">老師下班</button>
+    <div class="按鈕區域">
+        <button id="上班" class="上班按鈕">老師上班打卡</button>
+        <button id="下班" class="下班按鈕">老師下班打卡</button>
     </div>
 
     <script>
-        const 影片 = document.getElementById('鏡頭畫面');
-        const 顯示欄 = document.getElementById('狀態顯示');
-        const 後台網址 = 'https://script.google.com/macros/s/AKfycbx9BErtqeWYNRAKldSwTUE973D3IfQk9Bza-ehY8Glll19hfDfoyUMtFkKd7KynDloj/exec'; // 第一階段產生的 URL
+        const 影片 = document.getElementById('鏡頭');
+        const 訊息 = document.getElementById('提示訊息');
         
-        // 設定老師資料庫 (照片網址請使用轉換後的格式)
-        const 教師名單 = [
-            { 姓名: '林博瀚', 照片網址: 'https://lh3.googleusercontent.com/d/1yHwrJaSky8fRL8tiDoKvbfGDWUWGlkGT'},
-             
-        ];
+        // --- 設定區：請修改以下資訊 ---
+        const 後台網址 = 'https://script.google.com/macros/s/AKfycbx9BErtqeWYNRAKldSwTUE973D3IfQk9Bza-ehY8Glll19hfDfoyUMtFkKd7KynDloj/exec'; // 第一階段產生的 Google GAS URL
+        const 裝置專屬金鑰 = 'BOHAN-OFFICE-IP8'; 
+        const 補習班座標 = { 緯度: 22.6273, 經度: 120.3014 }; // 請填入補習班實際座標
 
-        let 臉部比對器;
-
-        // 1. 初始化 AI 模型並載入老師照片
+        // 1. 載入 AI 模型
         async function 初始化系統() {
-            顯示欄.innerText = "正在載入 AI 模型...";
-            await faceapi.nets.ssdMobilenetv1.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model');
-            await faceapi.nets.faceLandmark68Net.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model');
-            await faceapi.nets.faceRecognitionNet.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model');
-
-            顯示欄.innerText = "正在讀取雲端教師照片...";
-            const 標記特徵 = await Promise.all(
-                教師名單.map(async 教師 => {
-                    const 圖片網址 = `https://lh3.googleusercontent.com/d/${教師.ID}`;
-                    const 圖片 = await faceapi.fetchImage(圖片網址);
-                    const 特徵值 = await faceapi.detectSingleFace(圖片).withFaceLandmarks().withFaceDescriptor();
-                    return new faceapi.LabeledFaceDescriptors(教師.姓名, [特徵值.descriptor]);
-                })
-            );
-            
-            臉部比對器 = new faceapi.FaceMatcher(標記特徵, 0.6); // 0.6 是嚴格度
-            啟動鏡頭();
+            const 模型網址 = 'https://justadudewhohacks.github.io/face-api.js/models';
+            try {
+                await faceapi.nets.tinyFaceDetector.loadFromUri(模型網址);
+                await faceapi.nets.faceLandmark68Net.loadFromUri(模型網址);
+                await faceapi.nets.faceRecognitionNet.loadFromUri(模型網址);
+                
+                訊息.innerText = "模型載入成功，啟動鏡頭中...";
+                啟動鏡頭();
+            } catch (err) {
+                console.error(err);
+                訊息.innerText = "系統載入失敗，請檢查網路！";
+            }
         }
 
         // 2. 啟動 iPhone 8 鏡頭
         async function 啟動鏡頭() {
-            const 串流 = await navigator.mediaDevices.getUserMedia({ video: {} });
-            影片.srcObject = 串流;
-            顯示欄.innerText = "系統已就緒，請對準鏡頭打卡";
+            try {
+                const 串流 = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'user', width: 640, height: 480 } 
+                });
+                影片.srcObject = 串流;
+                訊息.innerText = "系統已就緒，請對準臉部";
+                訊息.classList.remove('讀取中');
+            } catch (err) {
+                訊息.innerText = "權限遭拒，請至 Safari 設定開啟相機";
+            }
         }
 
-        // 3. 執行辨識與傳送資料
-        async function 進行打卡(動作) {
-            const 偵測 = await faceapi.detectSingleFace(影片).withFaceLandmarks().withFaceDescriptor();
-            
-            if (!偵測) {
-                alert("找不到臉孔，請靠近一點再試一次");
-                return;
-            }
-
-            const 比對結果 = 臉部比對器.findBestMatch(偵測.descriptor);
-            if (比對結果.label === 'unknown') {
-                alert("辨識失敗：非本校教師");
-                return;
-            }
-
-            顯示欄.innerText = `辨識成功：${比對結果.label} 老師，傳送中...`;
-
-            fetch(後台網址, {
-                method: 'POST',
-                mode: 'no-cors', // 解決跨網域問題
-                body: JSON.stringify({
-                    name: 比對結果.label,
-                    action: 動作,
-                    confidence: (比對結果.distance * 100).toFixed(1) + "%"
-                })
-            }).then(() => {
-                alert(`${比對結果.label} 老師 ${動作} 成功！`);
-                顯示欄.innerText = "打卡完成，請下一位準備";
+        // 3. 取得 GPS 位置
+        function 取得位置() {
+            return new Promise((resolve, reject) => {
+                navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true });
             });
         }
 
-        document.getElementById('上班').addEventListener('click', () => 進行打卡('上班'));
-        document.getElementById('下班').addEventListener('click', () => 進行打卡('下班'));
+        // 4. 打卡主程式
+        async function 執行打卡(動作) {
+            訊息.innerText = "偵測中，請勿移動...";
+            
+            try {
+                // 執行人臉偵測
+                const 偵測結果 = await faceapi.detectSingleFace(影片, new faceapi.TinyFaceDetectorOptions());
+                
+                if (!偵測結果) {
+                    alert("【偵測失敗】請對準鏡頭，確保光線充足！");
+                    訊息.innerText = "未偵測到人臉";
+                    return;
+                }
 
+                // 取得位置防止遠端打卡
+                訊息.innerText = "檢查位置中...";
+                const 位置 = await 取得位置();
+                
+                const 打卡資料 = {
+                    name: "曾益慧", // 下一階段會自動比對姓名，目前先寫死測試
+                    action: 動作,
+                    deviceKey: 裝置專屬金鑰,
+                    lat: 位置.coords.latitude,
+                    lng: 位置.coords.longitude,
+                    confidence: (偵測結果.score * 100).toFixed(1) + "%"
+                };
+
+                // 傳送到 GAS 後端
+                訊息.innerText = "資料上傳中...";
+                const 回應 = await fetch(後台網址, {
+                    method: 'POST',
+                    mode: 'no-cors', // 解決跨網域問題
+                    body: JSON.stringify(打卡資料)
+                });
+
+                // 因為 no-cors 無法直接讀取 response，我們改用成功提示
+                alert(動作 + "指令已送出！請稍後確認試算表紀錄。\n(若超過8小時，系統將自動攔截)");
+                訊息.innerText = "打卡程序完成";
+
+            } catch (err) {
+                console.error(err);
+                alert("打卡失敗：" + err.message);
+                訊息.innerText = "發生錯誤";
+            }
+        }
+
+        // 綁定按鈕事件
+        document.getElementById('上班').onclick = () => 執行打卡('上班');
+        document.getElementById('下班').onclick = () => 執行打卡('下班');
+
+        // 自動執行
         初始化系統();
+
     </script>
 </body>
 </html>
