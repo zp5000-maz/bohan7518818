@@ -3,12 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>博瀚 AI 打卡系統V1.5</title>
+    <title>博瀚 AI 打卡系統</title>
     <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
         body { margin: 0; background: #000; color: white; font-family: "微軟正黑體", sans-serif; text-align: center; overflow: hidden; }
         #container { position: relative; width: 100vw; height: 65vh; background: #111; overflow: hidden; }
-        /* 影片與畫布都做水平翻轉，讓老師照鏡子時感覺自然 */
         video, canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
         .ui { padding: 15px; background: #000; height: 35vh; box-sizing: border-box; }
         .btn { padding: 18px 0; font-size: 22px; border-radius: 12px; border: none; margin: 8px 1%; font-weight: bold; width: 45%; }
@@ -16,11 +15,10 @@
         .off { background: #C62828; color: white; }
         .reg { background: #1565C0; color: white; width: 93%; margin-top: 15px; }
         #status { font-size: 18px; color: #0f0; padding: 10px; background: #222; min-height: 25px; }
-        .loader { color: #FFC107; font-weight: bold; }
     </style>
 </head>
 <body>
-    <div id="status" class="loader">正在初始化系統...</div>
+    <div id="status">正在初始化系統...</div>
     <div id="container">
         <video id="video" autoplay playsinline muted></video>
         <canvas id="overlay"></canvas>
@@ -28,177 +26,85 @@
     <div class="ui">
         <button class="btn on" onclick="handleAction('上班')">上班打卡</button>
         <button class="btn off" onclick="handleAction('下班')">下班打卡</button>
-        <button class="btn reg" onclick="startRegister()">👤 註冊新老師</button>
+        <button class="btn reg" onclick="startRegister()">👤 註冊老師  </button>
     </div>
 
     <script>
-        // --- 設定區 ---
-        const API_URL = "https://script.google.com/macros/s/AKfycbys0Wwap4rvSZD89FuUB0sZFi94qap2aK0dhnjBd9iB-nH26OsmamwbgBsq3QSsWtFd8g/exec"; // <--- 請務必換成您最新的 GAS 網址
-        let knownFaces = [];
-        let isEngineReady = false;
-        let currentDetectedName = "未知";
-        let currentDescriptor = null;
-
-        const statusEl = document.getElementById('status');
-        const video = document.getElementById('video');
-        const overlay = document.getElementById('overlay');
+        const API_URL = "https://script.google.com/macros/s/AKfycbxL5wPp_bs3ph44iWf23EEzzsEqIAqRTL4rkqbbrf4Yfm77nZzNJNI_NoHWmppF1rm-Ww/exec"; // <--- 請換成您最新的 GAS 網址
+        let knownFaces = [], isEngineReady = false, currentDetectedName = "未知", currentDescriptor = null;
+        const statusEl = document.getElementById('status'), video = document.getElementById('video'), overlay = document.getElementById('overlay');
 
         async function init() {
             try {
-                statusEl.innerText = "1/3 正在載入 AI 模型...";
                 const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
-                
                 await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
                 await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
                 await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
-
-                statusEl.innerText = "2/3 正在同步雲端名單...";
                 await syncKnownFaces();
-
-                statusEl.innerText = "3/3 正在啟動相機...";
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: "user", width: 640, height: 480 } 
-                });
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
                 video.srcObject = stream;
-
-                video.onplay = () => {
-                    isEngineReady = true;
-                    statusEl.innerText = "博瀚 AI 系統就緒";
-                    statusEl.classList.remove("loader");
-                    processFrame();
-                };
-
-            } catch (err) {
-                statusEl.innerText = "錯誤: " + err.message;
-                statusEl.style.color = "red";
-            }
+                video.onplay = () => { isEngineReady = true; statusEl.innerText = "博瀚 AI 系統就緒"; processFrame(); };
+            } catch (err) { statusEl.innerText = "相機錯誤: " + err.message; }
         }
 
         async function syncKnownFaces() {
-            try {
-                const resp = await fetch(API_URL);
-                knownFaces = await resp.json();
-            } catch(e) {
-                console.log("雲端無資料");
-            }
+            try { const resp = await fetch(API_URL); knownFaces = await resp.json(); } catch(e) {}
         }
 
         async function processFrame() {
             const displaySize = { width: video.offsetWidth, height: video.offsetHeight };
             faceapi.matchDimensions(overlay, displaySize);
-
             setInterval(async () => {
                 if (!isEngineReady) return;
-
                 const detections = await faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors();
                 const resizedDetections = faceapi.resizeResults(detections, displaySize);
-                
                 const ctx = overlay.getContext('2d');
                 ctx.clearRect(0, 0, overlay.width, overlay.height);
-
                 if (resizedDetections.length > 0) {
                     const d = resizedDetections[0];
                     currentDescriptor = d.descriptor;
-                    
                     let name = "未知";
                     if (knownFaces.length > 0) {
-                        const faceMatcher = new faceapi.FaceMatcher(
-                            knownFaces.map(f => new faceapi.LabeledFaceDescriptors(f.name, [new Float32Array(f.features)])), 
-                            0.55 
-                        );
-                        const bestMatch = faceMatcher.findBestMatch(d.descriptor);
-                        name = bestMatch.toString().split(' ')[0];
+                        const faceMatcher = new faceapi.FaceMatcher(knownFaces.map(f => new faceapi.LabeledFaceDescriptors(f.name, [new Float32Array(f.features)])), 0.55);
+                        name = faceMatcher.findBestMatch(d.descriptor).toString().split(' ')[0];
                     }
-                    
                     currentDetectedName = (name === "unknown") ? "未知" : name;
                     
-                    // --- 修正文字鏡像顛倒的核心邏輯 ---
+                    // 繪製方框與修正文字翻轉
                     const box = d.detection.box;
-                    
-                    // 1. 繪製方框
-                    ctx.strokeStyle = "#00FF00";
-                    ctx.lineWidth = 4;
+                    ctx.strokeStyle = "#00FF00"; ctx.lineWidth = 4;
                     ctx.strokeRect(box.x, box.y, box.width, box.height);
-
-                    // 2. 繪製文字 (需要反轉回來才是正的)
-                    ctx.save(); 
-                    ctx.scale(-1, 1); 
-                    
-                    ctx.font = "bold 28px 微軟正黑體";
-                    ctx.fillStyle = "#00FF00";
-                    
-                    // 計算在鏡像畫布中的正確 X 座標
-                    const textX = -(box.x + box.width);
-                    const textY = box.y - 10;
-                    
-                    ctx.fillText(currentDetectedName, textX, textY);
-                    ctx.restore(); 
-                    // ---------------------------------
-                    
-                } else {
-                    currentDetectedName = "未知";
-                    currentDescriptor = null;
-                }
-            }, 300); 
+                    ctx.save(); ctx.scale(-1, 1);
+                    ctx.font = "bold 28px 微軟正黑體"; ctx.fillStyle = "#00FF00";
+                    ctx.fillText(currentDetectedName, -(box.x + box.width), box.y - 10);
+                    ctx.restore();
+                } else { currentDescriptor = null; currentDetectedName = "未知"; }
+            }, 300);
         }
 
         async function handleAction(act) {
-            if (currentDetectedName === "未知" || currentDetectedName === "unknown") {
-                alert("辨識不到老師，請靠近鏡頭！");
-                return;
-            }
-            
-            const teacherName = currentDetectedName + "老師";
-            const confirmed = confirm(`確認為 【${currentDetectedName}】 老師進行 ${act}打卡嗎？`);
-            if (!confirmed) return;
+            if (currentDetectedName === "未知") { alert("辨識不到人臉！"); return; }
+            if (!confirm(`確認為 【${currentDetectedName}】 老師進行 ${act}？`)) return;
 
-            statusEl.innerText = `正在驗證紀錄...`;
+            statusEl.innerText = `正在驗證...`;
             try {
-                const response = await fetch(API_URL, {
-                    method: "POST",
-                    body: JSON.stringify({ type: "CHECKIN", name: teacherName, action: act })
-                });
-                
-                const result = await response.text();
-                
-                if (result === "SUCCESS") {
-                    alert(`✅ ${currentDetectedName} 老師 ${act}成功！`);
-                } else if (result === "ERROR:重複打卡") {
-                    alert(`⚠️ 提示：您今日已經完成【${act}】打卡，請勿重複操作。`);
-                } else if (result === "ERROR:尚未上班") {
-                    alert(`⚠️ 錯誤：您今日尚未有【上班】紀錄，請先進行上班打卡！`);
-                } else {
-                    alert("系統回傳：" + result);
-                }
-            } catch (e) {
-                alert("連線失敗，請檢查網路環境");
-            }
+                const res = await fetch(API_URL, { method: "POST", body: JSON.stringify({ type: "CHECKIN", name: currentDetectedName + "老師", action: act }) });
+                const result = await res.text();
+                if (result === "SUCCESS") alert(`✅ ${act}成功！報表已更新。`);
+                else if (result === "ERROR:重複打卡") alert(`⚠️ 今日已完成${act}，請勿重複操作。`);
+                else if (result === "ERROR:尚未上班") alert(`⚠️ 必須先打「上班」卡才能下班。`);
+                else if (result === "ERROR:超過8小時") alert(`⚠️ 工時已超過 8 小時！\n根據勞基法，請洽主任手動補登。`);
+                else alert("系統訊息：" + result);
+            } catch (e) { alert("連線失敗！"); }
             statusEl.innerText = "博瀚 AI 系統就緒";
         }
 
         async function startRegister() {
-            const name = prompt("請輸入新老師姓名：");
-            if (!name) return;
-            if (!currentDescriptor) {
-                alert("偵測不到人臉，請重新對準！");
-                return;
-            }
-
-            statusEl.innerText = `正在註冊 ${name} 老師...`;
-            const features = Array.from(currentDescriptor);
-
-            try {
-                await fetch(API_URL, {
-                    method: "POST",
-                    body: JSON.stringify({ type: "REGISTER", name: name, features: features })
-                });
-                alert(`註冊成功！系統將自動重新整理同步名單。`);
-                location.reload();
-            } catch (e) {
-                alert("註冊失敗");
-            }
+            const n = prompt("輸入新老師姓名：");
+            if (!n || !currentDescriptor) return;
+            await fetch(API_URL, { method: "POST", body: JSON.stringify({ type: "REGISTER", name: n, features: Array.from(currentDescriptor) }) });
+            alert("註冊成功！"); location.reload();
         }
-
         window.onload = init;
     </script>
 </body>
