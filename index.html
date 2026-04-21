@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>博瀚 AI 打卡系統V2</title>
+    <title>博瀚 AI 打卡系統V2.5</title>
     <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
         body { margin: 0; background: #000; color: white; font-family: "微軟正黑體", sans-serif; text-align: center; overflow: hidden; }
@@ -18,7 +18,7 @@
     </style>
 </head>
 <body>
-    <div id="status">正在初始化系統...</div>
+    <div id="status">正在載入 AI 引擎...</div>
     <div id="container">
         <video id="video" autoplay playsinline muted></video>
         <canvas id="overlay"></canvas>
@@ -26,11 +26,11 @@
     <div class="ui">
         <button class="btn on" onclick="handleAction('上班')">上班打卡</button>
         <button class="btn off" onclick="handleAction('下班')">下班打卡</button>
-        <button class="btn reg" onclick="startRegister()">👤 註冊老師  </button>
+        <button class="btn reg" onclick="startRegister()">👤 註冊老師</button>
     </div>
 
     <script>
-        const API_URL = "https://script.google.com/macros/s/AKfycbxL5wPp_bs3ph44iWf23EEzzsEqIAqRTL4rkqbbrf4Yfm77nZzNJNI_NoHWmppF1rm-Ww/exec"; // <--- 請換成您最新的 GAS 網址
+        const API_URL = "https://script.google.com/macros/s/AKfycbxbxciC_k-x3np68tf5mbZj9v4EPQUuls3FRVW6qU8VMLxDpLGxYeDz47NSNE6HXbj1Og/exec"; 
         let knownFaces = [], isEngineReady = false, currentDetectedName = "未知", currentDescriptor = null;
         const statusEl = document.getElementById('status'), video = document.getElementById('video'), overlay = document.getElementById('overlay');
 
@@ -43,12 +43,20 @@
                 await syncKnownFaces();
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
                 video.srcObject = stream;
-                video.onplay = () => { isEngineReady = true; statusEl.innerText = "博瀚 AI 系統就緒"; processFrame(); };
+                video.onplay = () => { isEngineReady = true; statusEl.innerText = "博瀚 AI 就緒"; processFrame(); };
             } catch (err) { statusEl.innerText = "相機錯誤: " + err.message; }
         }
 
         async function syncKnownFaces() {
-            try { const resp = await fetch(API_URL); knownFaces = await resp.json(); } catch(e) {}
+            try { 
+                const resp = await fetch(API_URL);
+                const rawData = await resp.json();
+                knownFaces = rawData.map(u => ({
+                    name: u.name,
+                    descriptor: new Float32Array(u.features)
+                }));
+                console.log("已同步名單:", knownFaces.length);
+            } catch(e) { console.log("讀取名單失敗"); }
         }
 
         async function processFrame() {
@@ -57,20 +65,20 @@
             setInterval(async () => {
                 if (!isEngineReady) return;
                 const detections = await faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors();
-                const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                const resized = faceapi.resizeResults(detections, displaySize);
                 const ctx = overlay.getContext('2d');
                 ctx.clearRect(0, 0, overlay.width, overlay.height);
-                if (resizedDetections.length > 0) {
-                    const d = resizedDetections[0];
+                
+                if (resized.length > 0) {
+                    const d = resized[0];
                     currentDescriptor = d.descriptor;
                     let name = "未知";
                     if (knownFaces.length > 0) {
-                        const faceMatcher = new faceapi.FaceMatcher(knownFaces.map(f => new faceapi.LabeledFaceDescriptors(f.name, [new Float32Array(f.features)])), 0.55);
+                        const faceMatcher = new faceapi.FaceMatcher(knownFaces.map(f => new faceapi.LabeledFaceDescriptors(f.name, [f.descriptor])), 0.5);
                         name = faceMatcher.findBestMatch(d.descriptor).toString().split(' ')[0];
                     }
                     currentDetectedName = (name === "unknown") ? "未知" : name;
                     
-                    // 繪製方框與修正文字翻轉
                     const box = d.detection.box;
                     ctx.strokeStyle = "#00FF00"; ctx.lineWidth = 4;
                     ctx.strokeRect(box.x, box.y, box.width, box.height);
@@ -79,31 +87,35 @@
                     ctx.fillText(currentDetectedName, -(box.x + box.width), box.y - 10);
                     ctx.restore();
                 } else { currentDescriptor = null; currentDetectedName = "未知"; }
-            }, 300);
+            }, 400);
         }
 
         async function handleAction(act) {
-            if (currentDetectedName === "未知") { alert("辨識不到人臉！"); return; }
+            if (currentDetectedName === "未知") { alert("尚未辨識出人名，請靠近鏡頭。"); return; }
             if (!confirm(`確認為 【${currentDetectedName}】 老師進行 ${act}？`)) return;
 
-            statusEl.innerText = `正在驗證...`;
+            statusEl.innerText = `驗證中...`;
             try {
-                const res = await fetch(API_URL, { method: "POST", body: JSON.stringify({ type: "CHECKIN", name: currentDetectedName + "老師", action: act }) });
+                const res = await fetch(API_URL, { method: "POST", body: JSON.stringify({ type: "CHECKIN", name: currentDetectedName, action: act }) });
                 const result = await res.text();
-                if (result === "SUCCESS") alert(`✅ ${act}成功！報表已更新。`);
-                else if (result === "ERROR:重複打卡") alert(`⚠️ 今日已完成${act}，請勿重複操作。`);
-                else if (result === "ERROR:尚未上班") alert(`⚠️ 必須先打「上班」卡才能下班。`);
-                else if (result === "ERROR:超過8小時") alert(`⚠️ 工時已超過 8 小時！\n根據勞基法，請洽主任手動補登。`);
-                else alert("系統訊息：" + result);
-            } catch (e) { alert("連線失敗！"); }
-            statusEl.innerText = "博瀚 AI 系統就緒";
+                if (result === "SUCCESS") alert(`✅ ${currentDetectedName} 老師 ${act}成功！`);
+                else if (result === "ERROR:重複打卡") alert(`⚠️ 今日已完成過 ${act}，請勿重複打卡。`);
+                else if (result === "ERROR:尚未上班") alert(`⚠️ 您今日尚未打「上班」卡，無法下班。`);
+                else if (result === "ERROR:超過8小時") alert(`⚠️ 工時已超過 8 小時，請洽主管補登紀錄。`);
+                else alert(result);
+            } catch (e) { alert("連線失敗"); }
+            statusEl.innerText = "博瀚 AI 就緒";
         }
 
         async function startRegister() {
-            const n = prompt("輸入新老師姓名：");
+            const n = prompt("請輸入註冊姓名：");
             if (!n || !currentDescriptor) return;
-            await fetch(API_URL, { method: "POST", body: JSON.stringify({ type: "REGISTER", name: n, features: Array.from(currentDescriptor) }) });
-            alert("註冊成功！"); location.reload();
+            statusEl.innerText = "正在錄入特徵...";
+            try {
+                const res = await fetch(API_URL, { method: "POST", body: JSON.stringify({ type: "REGISTER", name: n, features: Array.from(currentDescriptor) }) });
+                alert(await res.text());
+                location.reload();
+            } catch(e) { alert("註冊失敗"); }
         }
         window.onload = init;
     </script>
