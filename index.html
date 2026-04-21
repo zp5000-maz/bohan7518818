@@ -102,7 +102,7 @@
                     
                     let name = "未知";
                     if (knownFaces.length > 0) {
-                        const matcher = new faceapi.FaceMatcher(knownFaces.map(f => new faceapi.LabeledFaceDescriptors(f.name, [f.descriptor])), 0.5);
+                        const matcher = new faceapi.FaceMatcher(knownFaces.map(f => new faceapi.LabeledFaceDescriptors(f.name, [f.descriptor])), 0.45);
                         const match = matcher.findBestMatch(d.descriptor);
                         name = match.toString().split(' ')[0];
                     }
