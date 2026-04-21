@@ -3,22 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>博瀚 AI 打卡系統 (林博瀚編寫)</title>
+    <title>博瀚AI打卡系統 - 現場端</title>
     <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
         body { margin: 0; background: #000; color: white; font-family: "微軟正黑體", sans-serif; text-align: center; overflow: hidden; }
-        #container { position: relative; width: 100vw; height: 65vh; background: #111; overflow: hidden; }
+        #container { position: relative; width: 100vw; height: 60vh; background: #111; }
+        /* video 與 canvas 都要鏡像反轉，讓老師照鏡子一樣自然 */
         video, canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
-        .ui { padding: 15px; background: #000; height: 35vh; box-sizing: border-box; }
+        .ui { padding: 15px; background: #000; height: 40vh; box-sizing: border-box; }
         .btn { padding: 18px 0; font-size: 22px; border-radius: 12px; border: none; margin: 8px 1%; font-weight: bold; width: 45%; }
         .on { background: #2E7D32; color: white; }
         .off { background: #C62828; color: white; }
-        .reg { background: #1565C0; color: white; width: 93%; margin-top: 15px; }
-        #status { font-size: 18px; color: #0f0; padding: 10px; background: #222; min-height: 25px; }
+        .reg { background: #333; color: #888; width: 93%; margin-top: 10px; font-size: 14px; border: 1px solid #444; }
+        #status { font-size: 18px; color: #0f0; padding: 12px; background: #222; min-height: 30px; font-weight: bold; }
     </style>
 </head>
 <body>
-    <div id="status">正在載入 AI 與 定位系統...</div>
+    <div id="status">系統啟動中...</div>
     <div id="container">
         <video id="video" autoplay playsinline muted></video>
         <canvas id="overlay"></canvas>
@@ -26,75 +27,134 @@
     <div class="ui">
         <button class="btn on" onclick="handleAction('上班')">上班打卡</button>
         <button class="btn off" onclick="handleAction('下班')">下班打卡</button>
-        <button class="btn reg" onclick="startRegister()">👤 註冊老師</button>
+        <button class="btn reg" onclick="startRegister()">  管理模式 (註冊/設定)</button>
     </div>
 
     <script>
-        const API_URL = "https://script.google.com/macros/s/AKfycbznj_uCsa_sMuy_pNtaUJEiL0L02mSjYqF2dNT8RUEUpqev7RUPPF9_FFibed-ji0UcxQ/exec"; 
+        // --- [請填入您的部署網址] ---
+        const API_URL = "https://script.google.com/macros/s/AKfycbzB2dePYa5gWhniFwDiMIaUNeriafhSBiJNt4PPIEJ5ETSt8j8jHtIVXTSNXh9p7a90OQ/exec"; 
+        
+        // --- [博瀚補習班座標設定] ---
+        const SCHOOL_LOC = { 
+            lat: 22.606168413064104, 
+            lng: 120.33637527528433 
+        }; 
+        
         let knownFaces = [], isEngineReady = false, currentDetectedName = "未知", currentDescriptor = null;
         const statusEl = document.getElementById('status'), video = document.getElementById('video'), overlay = document.getElementById('overlay');
 
+        // 初始化 AI 與 相機
         async function init() {
             try {
                 const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
                 await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
                 await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
                 await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+                
                 await syncKnownFaces();
+                
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
                 video.srcObject = stream;
-                video.onplay = () => { isEngineReady = true; statusEl.innerText = "博瀚 AI 就緒"; processFrame(); };
-            } catch (err) { statusEl.innerText = "初始化失敗: " + err.message; }
+                video.onplay = () => { 
+                    isEngineReady = true; 
+                    statusEl.innerText = "博瀚 AI 現場端就緒"; 
+                    processFrame(); 
+                };
+            } catch (err) { statusEl.innerText = "相機錯誤: " + err.message; }
         }
 
+        // 從雲端下載老師名單
         async function syncKnownFaces() {
             try { 
                 const resp = await fetch(API_URL);
                 const rawData = await resp.json();
-                knownFaces = rawData.map(u => ({ name: u.name, descriptor: new Float32Array(u.features) }));
-            } catch(e) { console.log("讀取名單失敗"); }
+                knownFaces = rawData.map(u => ({ 
+                    name: u.name, 
+                    descriptor: new Float32Array(u.features) 
+                }));
+            } catch(e) { console.log("暫無名單"); }
         }
 
+        // 計算距離 (公尺)
+        function getDistanceM(lat1, lon1, lat2, lon2) {
+            const R = 6371; 
+            const dLat = (lat2-lat1)*Math.PI/180; 
+            const dLon = (lon2-lon1)*Math.PI/180;
+            const a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)*Math.sin(dLon/2);
+            return Math.round(R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))) * 1000);
+        }
+
+        // 畫面偵測迴圈
         async function processFrame() {
             const displaySize = { width: video.offsetWidth, height: video.offsetHeight };
             faceapi.matchDimensions(overlay, displaySize);
+            
             setInterval(async () => {
                 if (!isEngineReady) return;
                 const detections = await faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors();
                 const resized = faceapi.resizeResults(detections, displaySize);
                 const ctx = overlay.getContext('2d');
                 ctx.clearRect(0, 0, overlay.width, overlay.height);
+                
                 if (resized.length > 0) {
                     const d = resized[0];
                     currentDescriptor = d.descriptor;
+                    
                     let name = "未知";
                     if (knownFaces.length > 0) {
                         const matcher = new faceapi.FaceMatcher(knownFaces.map(f => new faceapi.LabeledFaceDescriptors(f.name, [f.descriptor])), 0.5);
-                        name = matcher.findBestMatch(d.descriptor).toString().split(' ')[0];
+                        const match = matcher.findBestMatch(d.descriptor);
+                        name = match.toString().split(' ')[0];
                     }
                     currentDetectedName = (name === "unknown") ? "未知" : name;
+                    
                     const box = d.detection.box;
                     ctx.strokeStyle = "#00FF00"; ctx.lineWidth = 4;
                     ctx.strokeRect(box.x, box.y, box.width, box.height);
-                    ctx.save(); ctx.scale(-1, 1);
-                    ctx.font = "bold 28px 微軟正黑體"; ctx.fillStyle = "#00FF00";
+                    
+                    // 修正鏡像後的文字顯示
+                    ctx.save(); 
+                    ctx.scale(-1, 1);
+                    ctx.font = "bold 24px 微軟正黑體"; 
+                    ctx.fillStyle = "#00FF00";
                     ctx.fillText(currentDetectedName, -(box.x + box.width), box.y - 10);
                     ctx.restore();
-                } else { currentDescriptor = null; currentDetectedName = "未知"; }
+                } else { 
+                    currentDescriptor = null; 
+                    currentDetectedName = "未知"; 
+                }
             }, 400);
         }
 
+        // 執行打卡動作
         async function handleAction(act) {
-            if (currentDetectedName === "未知") { alert("尚未辨識人臉！"); return; }
+            if (currentDetectedName === "未知") { alert("請面向鏡頭進行辨識。"); return; }
             
-            statusEl.innerText = "正在取得位置資訊...";
+            statusEl.innerText = "正在定位並抓拍...";
+            
+            // 抓取當前影像作為照片存證
+            const photoCanvas = document.createElement('canvas');
+            photoCanvas.width = video.videoWidth; 
+            photoCanvas.height = video.videoHeight;
+            const pctx = photoCanvas.getContext('2d');
+            pctx.translate(photoCanvas.width, 0); 
+            pctx.scale(-1, 1); // 拍照也轉回正面
+            pctx.drawImage(video, 0, 0);
+            const photoBase64 = photoCanvas.toDataURL('image/jpeg', 0.7);
+
+            // 取得 GPS
             navigator.geolocation.getCurrentPosition(async (pos) => {
                 const lat = pos.coords.latitude;
                 const lng = pos.coords.longitude;
+                const dist = getDistanceM(lat, lng, SCHOOL_LOC.lat, SCHOOL_LOC.lng);
                 
-                if (!confirm(`確認在校區內為 【${currentDetectedName}】 進行 ${act}？`)) return;
+                statusEl.innerText = `距離補習班：${dist} 公尺`;
+                
+                if (!confirm(`【${currentDetectedName}】老師\n目前距離補習班約 ${dist} 公尺\n確認要執行「${act}」嗎？`)) return;
 
-                statusEl.innerText = `雲端驗證中...`;
+                statusEl.style.color = "#ffff00";
+                statusEl.innerText = "上傳資料中...";
+                
                 try {
                     const res = await fetch(API_URL, { 
                         method: "POST", 
@@ -102,35 +162,50 @@
                             type: "CHECKIN", 
                             name: currentDetectedName, 
                             action: act,
-                            lat: lat,
-                            lng: lng
+                            lat: lat, lng: lng,
+                            photo: photoBase64
                         }) 
                     });
                     const result = await res.text();
-                    if (result === "SUCCESS") alert(`✅ ${currentDetectedName} 老師 ${act}成功！`);
-                    else if (result === "ERROR:不在校區範圍內") alert(`❌ 打卡失敗：您目前不在補習班範圍內，請回校區後重試。`);
-                    else if (result === "ERROR:重複打卡") alert(`⚠️ 今日已完成過 ${act}。`);
-                    else if (result === "ERROR:尚未上班") alert(`⚠️ 需先打「上班」卡。`);
-                    else if (result === "ERROR:超過8小時") alert(`⚠️ 工時超標，請洽主管補登紀錄。`);
-                    else alert(result);
-                } catch (e) { alert("連線失敗"); }
-                statusEl.innerText = "博瀚 AI 就緒";
+                    if (result === "SUCCESS") {
+                        statusEl.style.color = "#0f0";
+                        alert(`✅ 打卡成功！\n距離：${dist}公尺`);
+                    } else {
+                        statusEl.style.color = "#f00";
+                        alert(`❌ 打卡失敗\n原因：${result}`);
+                    }
+                } catch (e) { alert("網路連線失敗，請檢查網路。"); }
+                statusEl.innerText = "博瀚 AI 現場端就緒";
             }, (err) => {
-                alert("打卡失敗：必須開啟手機 GPS 定位權限才能打卡！");
-                statusEl.innerText = "博瀚 AI 就緒";
+                alert("打卡失敗：必須開啟 GPS 定位權限。");
+                statusEl.innerText = "請開啟 GPS 後重試";
             }, { enableHighAccuracy: true });
         }
 
+        // 註冊模式
         async function startRegister() {
-            const n = prompt("請輸入註冊姓名：");
-            if (!n || !currentDescriptor) return;
-            statusEl.innerText = "錄入中...";
+            const pw = prompt("請輸入管理員密碼：");
+            if (pw !== "0000") { alert("密碼錯誤"); return; } 
+            
+            const n = prompt("請輸入新老師姓名：");
+            if (!n) return;
+            if (!currentDescriptor) { alert("尚未偵測到人臉，請面向鏡頭。"); return; }
+            
+            statusEl.innerText = "註冊中...";
             try {
-                const res = await fetch(API_URL, { method: "POST", body: JSON.stringify({ type: "REGISTER", name: n, features: Array.from(currentDescriptor) }) });
+                const res = await fetch(API_URL, { 
+                    method: "POST", 
+                    body: JSON.stringify({ 
+                        type: "REGISTER", 
+                        name: n, 
+                        features: Array.from(currentDescriptor) 
+                    }) 
+                });
                 alert(await res.text());
-                location.reload();
+                location.reload(); // 註冊完重載名單
             } catch(e) { alert("註冊失敗"); }
         }
+
         window.onload = init;
     </script>
 </body>
