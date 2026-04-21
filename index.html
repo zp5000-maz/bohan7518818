@@ -1,106 +1,130 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>博瀚雲端打卡系統</title>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>博瀚 AI 打卡系統</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
-        body { margin: 0; background: #000; color: white; font-family: sans-serif; overflow: hidden; text-align: center; }
-        video { width: 100%; height: auto; transform: scaleX(-1); }
-        canvas { position: absolute; left: 0; top: 0; width: 100%; height: auto; transform: scaleX(-1); }
-        .btn-group { position: fixed; bottom: 20px; width: 100%; display: flex; justify-content: center; gap: 20px; }
-        button { padding: 15px 30px; font-size: 20px; border: none; border-radius: 10px; color: white; font-weight: bold; }
-        .btn-on { background: #4CAF50; }
-        .btn-off { background: #D32F2F; }
-        #status { position: fixed; top: 10px; width: 100%; background: rgba(0,0,0,0.5); padding: 10px; font-size: 18px; color: #0f0; }
+        body { margin: 0; background: #000; color: white; font-family: "微軟正黑體", sans-serif; text-align: center; }
+        #container { position: relative; width: 100vw; height: 70vh; background: #111; }
+        video, canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+        .ui { padding: 20px; }
+        .btn { padding: 15px 25px; font-size: 18px; border-radius: 10px; border: none; margin: 5px; font-weight: bold; }
+        .on { background: #4CAF50; color: white; }
+        .off { background: #F44336; color: white; }
+        .reg { background: #2196F3; color: white; }
+        #status { font-size: 20px; color: #0f0; margin-top: 10px; }
     </style>
 </head>
 <body>
-    <div id="status">正在初始化相機與 AI...</div>
-    <video id="webcam" autoplay playsinline></video>
-    <canvas id="output_canvas"></canvas>
-
-    <div class="btn-group">
-        <button class="btn-on" onclick="setAction('上班')">上班打卡</button>
-        <button class="btn-off" onclick="setAction('下班')">下班打卡</button>
+    <div id="status">正在加載 AI 引擎...</div>
+    <div id="container">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas id="overlay"></canvas>
+    </div>
+    <div class="ui">
+        <button class="btn on" onclick="handleAction('上班')">上班打卡</button>
+        <button class="btn off" onclick="handleAction('下班')">下班打卡</button>
+        <br>
+        <button class="btn reg" onclick="startRegister()">👤 註冊新老師</button>
     </div>
 
     <script>
-        const video = document.getElementById('webcam');
-        const canvas = document.getElementById('output_canvas');
-        const ctx = canvas.getContext('2d');
-        const statusLabel = document.getElementById('status');
-        
-        let currentAction = null;
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbz0RUAu2aAoSlz7dWlPylYDBp59MW7-0nj9XCOW5Ensllp-lVRg0G14ZrN67zMiKWzA7A/exec"; // <--- 請換成您的網址
+        const API_URL = "https://script.google.com/macros/s/AKfycbz0RUAu2aAoSlz7dWlPylYDBp59MW7-0nj9XCOW5Ensllp-lVRg0G14ZrN67zMiKWzA7A/exec"; // <--- 請換成您的 GAS 網址
+        let knownFaces = [];
+        let isEngineReady = false;
 
-        // 初始化 MediaPipe
-        const faceDetection = new FaceDetection({
-            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`
-        });
+        async function init() {
+            const status = document.getElementById('status');
+            // 1. 下載模型 (從網路載入)
+            const MODEL_URL = 'https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights';
+            await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
+            await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+            await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+            
+            status.innerText = "正在同步雲端名單...";
+            // 2. 從 Google 下載已知老師特徵
+            try {
+                const resp = await fetch(API_URL);
+                knownFaces = await resp.json();
+            } catch(e) { console.log("目前無資料"); }
 
-        faceDetection.setOptions({ model: 'short', minDetectionConfidence: 0.5 });
-        faceDetection.onResults(onResults);
-
-        async function setupCamera() {
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+            // 3. 啟動鏡頭
+            const video = document.getElementById('video');
+            const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
             video.srcObject = stream;
-            video.onloadedmetadata = () => {
-                canvas.width = video.videoWidth;
-                canvas.height = video.videoHeight;
-                statusLabel.innerText = "博瀚 AI 系統就緒 (iPhone 8 加速版)";
-                detect();
-            };
+            
+            isEngineReady = true;
+            status.innerText = "博瀚 AI 系統就緒";
+            processFrame();
         }
 
-        async function detect() {
-            await faceDetection.send({ image: video });
-            requestAnimationFrame(detect);
+        async function processFrame() {
+            if(!isEngineReady) return;
+            const video = document.getElementById('video');
+            const overlay = document.getElementById('overlay');
+            const displaySize = { width: video.videoWidth, height: video.videoHeight };
+            faceapi.matchDimensions(overlay, displaySize);
+
+            // 每秒辨識偵測
+            setInterval(async () => {
+                const detections = await faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors();
+                const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                const ctx = overlay.getContext('2d');
+                ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+                resizedDetections.forEach(d => {
+                    let name = "未知";
+                    if (knownFaces.length > 0) {
+                        const faceMatcher = new faceapi.FaceMatcher(
+                            knownFaces.map(f => new faceapi.LabeledFaceDescriptors(f.name, [new Float32Array(f.features)])), 
+                            0.5
+                        );
+                        const bestMatch = faceMatcher.findBestMatch(d.descriptor);
+                        name = bestMatch.toString().split(' ')[0];
+                    }
+                    const drawBox = new faceapi.draw.DrawBox(d.detection.box, { label: name });
+                    drawBox.draw(overlay);
+                    window.currentFace = { name, descriptor: d.descriptor };
+                });
+            }, 200);
         }
 
-        function onResults(results) {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            if (results.detections.length > 0) {
-                const detection = results.detections[0];
-                const bbox = detection.boundingBox;
-                ctx.strokeStyle = "#00FF00";
-                ctx.lineWidth = 5;
-                ctx.strokeRect(bbox.xCenter * canvas.width - (bbox.width * canvas.width / 2),
-                               bbox.yCenter * canvas.height - (bbox.height * canvas.height / 2),
-                               bbox.width * canvas.width, bbox.height * canvas.height);
-
-                // 如果按下了按鈕且偵測到臉
-                if (currentAction) {
-                    sendDataToCloud(currentAction);
-                    currentAction = null;
-                }
+        async function handleAction(act) {
+            if(!window.currentFace || window.currentFace.name === "未知") {
+                alert("辨識不到老師，請對準鏡頭！");
+                return;
             }
-        }
-
-        function setAction(act) {
-            currentAction = act;
-            statusLabel.innerText = `請對準鏡頭進行【${act}】...`;
-            statusLabel.style.color = "#FF0";
-        }
-
-        function sendDataToCloud(action) {
-            statusLabel.innerText = "辨識中，正在上傳紀錄...";
-            // 曾老師注意：這裡我們先用簡單的「掃到臉就上傳」測試連通性
-            // 未來可以加上 face-api.js 進行具體老師名字的比對
-            fetch(GOOGLE_SCRIPT_URL, {
+            const name = window.currentFace.name;
+            document.getElementById('status').innerText = `傳送中... ${name} ${act}`;
+            
+            await fetch(API_URL, {
                 method: "POST",
-                mode: "no-cors", // 避免跨網域問題
-                body: JSON.stringify({ name: "測試老師", action: action })
-            }).then(() => {
-                statusLabel.innerText = `✅ ${action}成功！已傳送至雲端`;
-                statusLabel.style.color = "#0F0";
-                setTimeout(() => { statusLabel.innerText = "博瀚 AI 系統就緒"; statusLabel.style.color = "#0F0"; }, 3000);
+                body: JSON.stringify({ type: "CHECKIN", name: name, action: act })
             });
+            alert(`${name} 老師，${act}打卡成功！`);
+            document.getElementById('status').innerText = "博瀚 AI 系統就緒";
         }
 
-        setupCamera();
+        async function startRegister() {
+            const name = prompt("請輸入新老師姓名：");
+            if (!name) return;
+            if (!window.currentFace) { alert("請對準人臉後再按註冊！"); return; }
+            
+            document.getElementById('status').innerText = "註冊資料上傳中...";
+            const features = Array.from(window.currentFace.descriptor);
+            
+            await fetch(API_URL, {
+                method: "POST",
+                body: JSON.stringify({ type: "REGISTER", name: name, features: features })
+            });
+            
+            alert(`註冊成功！系統將重新載入。`);
+            location.reload();
+        }
+
+        init();
     </script>
 </body>
 </html>
