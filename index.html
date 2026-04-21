@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>博瀚 AI 打卡系統V1.2</title>    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <title>博瀚 AI 打卡系統V1.5</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
         body { margin: 0; background: #000; color: white; font-family: "微軟正黑體", sans-serif; text-align: center; overflow: hidden; }
         #container { position: relative; width: 100vw; height: 65vh; background: #111; overflow: hidden; }
@@ -27,7 +28,7 @@
     <div class="ui">
         <button class="btn on" onclick="handleAction('上班')">上班打卡</button>
         <button class="btn off" onclick="handleAction('下班')">下班打卡</button>
-        <button class="btn reg" onclick="startRegister()">👤 註冊新老師 (曾老師專用)</button>
+        <button class="btn reg" onclick="startRegister()">👤 註冊新老師</button>
     </div>
 
     <script>
@@ -114,20 +115,19 @@
                     // --- 修正文字鏡像顛倒的核心邏輯 ---
                     const box = d.detection.box;
                     
-                    // 1. 繪製方框 (框框在鏡像畫布下是正常的)
+                    // 1. 繪製方框
                     ctx.strokeStyle = "#00FF00";
                     ctx.lineWidth = 4;
                     ctx.strokeRect(box.x, box.y, box.width, box.height);
 
                     // 2. 繪製文字 (需要反轉回來才是正的)
                     ctx.save(); 
-                    ctx.scale(-1, 1); // 再次反轉畫布 (負負得正)
+                    ctx.scale(-1, 1); 
                     
                     ctx.font = "bold 28px 微軟正黑體";
                     ctx.fillStyle = "#00FF00";
                     
                     // 計算在鏡像畫布中的正確 X 座標
-                    // 座標計算： -(左側座標 + 方框寬度)
                     const textX = -(box.x + box.width);
                     const textY = box.y - 10;
                     
@@ -148,18 +148,30 @@
                 return;
             }
             
+            const teacherName = currentDetectedName + "老師";
             const confirmed = confirm(`確認為 【${currentDetectedName}】 老師進行 ${act}打卡嗎？`);
             if (!confirmed) return;
 
-            statusEl.innerText = `正在傳送 ${act}紀錄...`;
+            statusEl.innerText = `正在驗證紀錄...`;
             try {
-                await fetch(API_URL, {
+                const response = await fetch(API_URL, {
                     method: "POST",
-                    body: JSON.stringify({ type: "CHECKIN", name: currentDetectedName + "老師", action: act })
+                    body: JSON.stringify({ type: "CHECKIN", name: teacherName, action: act })
                 });
-                alert(`${currentDetectedName} 老師 ${act}成功！`);
+                
+                const result = await response.text();
+                
+                if (result === "SUCCESS") {
+                    alert(`✅ ${currentDetectedName} 老師 ${act}成功！`);
+                } else if (result === "ERROR:重複打卡") {
+                    alert(`⚠️ 提示：您今日已經完成【${act}】打卡，請勿重複操作。`);
+                } else if (result === "ERROR:尚未上班") {
+                    alert(`⚠️ 錯誤：您今日尚未有【上班】紀錄，請先進行上班打卡！`);
+                } else {
+                    alert("系統回傳：" + result);
+                }
             } catch (e) {
-                alert("連線失敗，請檢查網路");
+                alert("連線失敗，請檢查網路環境");
             }
             statusEl.innerText = "博瀚 AI 系統就緒";
         }
