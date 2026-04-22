@@ -3,18 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>博瀚管理系統 - iOS 優化版</title>
+    <title>博瀚管理系統 - 偵測強化版</title>
     <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
         body { margin: 0; background: #000; color: white; font-family: "微軟正黑體", sans-serif; text-align: center; overflow: hidden; }
-        #container { position: relative; width: 100vw; height: 60vh; background: #111; }
+        #container { position: relative; width: 100vw; height: 60vh; background: #111; overflow: hidden;}
         video, canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
         .ui { padding: 15px; background: #000; height: 40vh; box-sizing: border-box; }
         .btn { padding: 18px 0; font-size: 22px; border-radius: 12px; border: none; margin: 8px 1%; font-weight: bold; width: 45%; }
         .on { background: #2E7D32; color: white; }
         .off { background: #C62828; color: white; }
         .reg { background: #333; color: #bbb; width: 93%; margin-top: 10px; font-size: 14px; border: 1px solid #444; }
-        #status { font-size: 18px; color: #FFFFFF; padding: 12px; background: #222; min-height: 30px; font-weight: bold; }
+        #status { font-size: 16px; color: #FFFFFF; padding: 12px; background: #222; min-height: 25px; font-weight: bold; }
         .loading-mask { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: none; z-index: 100; flex-direction: column; justify-content: center; align-items: center; }
     </style>
 </head>
@@ -34,66 +34,42 @@
     </div>
 
     <script>
-        // ==========================================
-        // 核心設定：博瀚文理專屬座標
-        // ==========================================
         const API_URL = "https://script.google.com/macros/s/AKfycbzvLPrTwyu0Z4v7aBp2A7VAjRYr3oCeiJEnN9vyibUGhXczqceY-fgVQ2aY2pTw-QM5qA/exec"; 
-        const SCHOOL_LOC = { 
-            lat: 22.60600592058107, 
-            lng: 120.33630488747696 
-        }; 
+        const SCHOOL_LOC = { lat: 22.60600592058107, lng: 120.33630488747696 }; 
         
         let faceMatcher = null; 
         let isEngineReady = false;
         let currentDetectedName = "未知";
         let currentDescriptor = null;
 
-        // [優化版] 初始化函式：解決 iOS 黑屏問題
         async function init() {
             const statusEl = document.getElementById('status');
             try {
                 const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
-                statusEl.innerText = "正在載入 AI 模型...";
-                
+                statusEl.innerText = "1/3 模型載入中...";
                 await Promise.all([
                     faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
                     faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
                     faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
                 ]);
 
-                statusEl.innerText = "正在讀取老師名單...";
+                statusEl.innerText = "2/3 同步老師名單...";
                 await syncKnownFaces();
 
-                statusEl.innerText = "正在喚醒相機...";
-                const constraints = { 
-                    video: { 
-                        facingMode: "user",
-                        width: { ideal: 640 },
-                        height: { ideal: 480 }
-                    } 
-                };
-
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                statusEl.innerText = "3/3 啟動鏡頭...";
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
                 const video = document.getElementById('video');
                 video.srcObject = stream;
                 
-                // 強制設定 iOS 播放屬性
-                video.setAttribute('autoplay', '');
-                video.setAttribute('muted', '');
-                video.setAttribute('playsinline', 'true'); // 必須為 true 避免全螢幕
-                
-                video.onplay = () => { 
+                video.onloadedmetadata = () => {
+                    video.play();
                     isEngineReady = true; 
-                    statusEl.innerText = "博瀚 AI 現場端就緒"; 
-                    processFrame(); 
+                    statusEl.innerText = "AI 辨識引擎啟動中...";
+                    startDetectionLoop(); // 確保影片讀取到尺寸後才啟動循環
                 };
 
-                // 補償機制：確保影片一定會播放
-                await video.play();
-
             } catch (err) { 
-                statusEl.innerText = "相機啟動失敗，請檢查 HTTPS 或權限";
-                console.error(err);
+                statusEl.innerText = "出錯了: " + err.message;
             }
         }
 
@@ -101,52 +77,66 @@
             try { 
                 const resp = await fetch(API_URL);
                 const rawData = await resp.json();
-                if (!rawData.length) return;
+                if (!rawData || rawData.length === 0) return;
                 const nameMap = {};
                 rawData.forEach(u => {
                     if (!nameMap[u.name]) nameMap[u.name] = [];
                     nameMap[u.name].push(new Float32Array(u.features));
                 });
                 const labeledDescriptors = Object.keys(nameMap).map(name => new faceapi.LabeledFaceDescriptors(name, nameMap[name]));
-                faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.35); // 平衡門檻
-            } catch(e) { console.log("載入名單失敗"); }
+                faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.4); // 調回 0.4 確保第一波能抓到人
+            } catch(e) { console.error("名單同步失敗"); }
         }
 
-        async function processFrame() {
+        function startDetectionLoop() {
             const video = document.getElementById('video');
             const overlay = document.getElementById('overlay');
+            const statusEl = document.getElementById('status');
+
+            // 這裡必須在每一格畫面處理前重新對齊一次尺寸，解決 iPhone 8 尺寸偏移問題
             const displaySize = { width: video.offsetWidth, height: video.offsetHeight };
             faceapi.matchDimensions(overlay, displaySize);
-            
+
             setInterval(async () => {
                 if (!isEngineReady) return;
+
+                // 執行偵測
                 const detections = await faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors();
                 const resized = faceapi.resizeResults(detections, displaySize);
-                const ctx = overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height);
+                
+                const ctx = overlay.getContext('2d');
+                ctx.clearRect(0, 0, overlay.width, overlay.height);
                 
                 if (resized.length > 0) {
                     const d = resized[0];
                     currentDescriptor = d.descriptor;
+
                     if (faceMatcher) {
                         const match = faceMatcher.findBestMatch(d.descriptor);
-                        if (match.label !== "unknown") {
-                            currentDetectedName = match.label;
-                        } else {
-                            currentDetectedName = "未知";
-                        }
+                        currentDetectedName = (match.label === "unknown") ? "未知" : match.label;
                     }
-                    const ctxObj = overlay.getContext('2d');
-                    ctxObj.strokeStyle = "#FFFFFF"; ctxObj.lineWidth = 3;
-                    ctxObj.strokeRect(d.detection.box.x, d.detection.box.y, d.detection.box.width, d.detection.box.height);
-                    ctxObj.save(); ctxObj.scale(-1, 1);
-                    ctxObj.font = "bold 24px 微軟正黑體"; ctxObj.fillStyle = "#FFFFFF";
-                    ctxObj.fillText(currentDetectedName, -(d.detection.box.x + d.detection.box.width), d.detection.box.y - 10);
-                    ctxObj.restore();
-                } else { 
-                    currentDetectedName = "未知"; 
-                    currentDescriptor = null; 
+                    
+                    statusEl.innerText = "偵測到：" + currentDetectedName;
+
+                    // 繪製白色方框
+                    const box = d.detection.box;
+                    ctx.strokeStyle = "#FFFFFF"; 
+                    ctx.lineWidth = 4;
+                    ctx.strokeRect(box.x, box.y, box.width, box.height);
+
+                    // 繪製姓名 (反轉處理)
+                    ctx.save();
+                    ctx.scale(-1, 1);
+                    ctx.font = "bold 24px 微軟正黑體";
+                    ctx.fillStyle = "#FFFFFF";
+                    ctx.fillText(currentDetectedName, -(box.x + box.width), box.y - 10);
+                    ctx.restore();
+                } else {
+                    currentDetectedName = "未知";
+                    currentDescriptor = null;
+                    statusEl.innerText = "請將臉部對準鏡頭";
                 }
-            }, 300);
+            }, 300); // 0.3秒偵測一次
         }
 
         async function handleAction(act) {
@@ -162,10 +152,10 @@
                         }) 
                     });
                     const msg = await res.text();
-                    alert(msg === "SUCCESS" ? `✅ ${currentDetectedName} 老師 ${act} 成功` : `❌ 失敗：${msg}`);
-                } catch(e) { alert("系統連線錯誤"); }
+                    alert(msg === "SUCCESS" ? `✅ ${currentDetectedName} 成功` : `❌ ${msg}`);
+                } catch(e) { alert("連線錯誤"); }
                 document.getElementById('mask').style.display = "none";
-            }, () => { alert("請開啟定位權限"); document.getElementById('mask').style.display = "none"; }, { enableHighAccuracy: true });
+            }, () => { alert("請開啟定位"); document.getElementById('mask').style.display = "none"; }, { enableHighAccuracy: true });
         }
 
         async function startRegister() {
@@ -176,8 +166,8 @@
             
             document.getElementById('mask').style.display = "flex";
             for(let i = 1; i <= 8; i++) {
-                document.getElementById('status').innerText = `錄製特徵 (${i}/8)...`;
-                await new Promise(r => setTimeout(r, 400));
+                document.getElementById('status').innerText = `錄製中 (${i}/8)...`;
+                await new Promise(r => setTimeout(r, 450));
                 if(currentDescriptor) {
                     await fetch(API_URL, { 
                         method: "POST", 
@@ -185,7 +175,7 @@
                     });
                 }
             }
-            alert(`註冊完成！`);
+            alert(`註冊完成！系統重啟。`);
             location.reload();
         }
 
