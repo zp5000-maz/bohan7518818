@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>博瀚AI辨識管理系統 - 輕量版</title>
+    <title>博瀚AI辨識系統 - 穩定版</title>
     <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
         body { margin: 0; background: #000; color: white; font-family: "微軟正黑體", sans-serif; text-align: center; overflow: hidden; }
@@ -19,7 +19,7 @@
     </style>
 </head>
 <body>
-    <div id="status">博瀚 AI 初始化中...</div>
+    <div id="status">博瀚 AI辨識初始化...</div>
     <div id="container">
         <video id="video" autoplay playsinline muted></video>
         <canvas id="overlay"></canvas>
@@ -34,14 +34,9 @@
     </div>
 
     <script>
-        // ==========================================
-        // 核心設定：已更新指定座標
-        // ==========================================
-        const API_URL = "https://script.google.com/macros/s/AKfycbzvLPrTwyu0Z4v7aBp2A7VAjRYr3oCeiJEnN9vyibUGhXczqceY-fgVQ2aY2pTw-QM5qA/exec"; 
-        const SCHOOL_LOC = { 
-            lat: 22.60600592058107, 
-            lng: 120.33630488747696 
-        }; 
+        const API_URL = "
+https://script.google.com/macros/s/AKfycbzvLPrTwyu0Z4v7aBp2A7VAjRYr3oCeiJEnN9vyibUGhXczqceY-fgVQ2aY2pTw-QM5qA/exec"; 
+        const SCHOOL_LOC = { lat: 22.60600592058107, lng: 120.33630488747696 }; 
         
         let faceMatcher = null; 
         let isEngineReady = false;
@@ -78,7 +73,8 @@
                     nameMap[u.name].push(new Float32Array(u.features));
                 });
                 const labeledDescriptors = Object.keys(nameMap).map(name => new faceapi.LabeledFaceDescriptors(name, nameMap[name]));
-                faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.3); // 嚴謹門檻
+                // 【調整】將閾值設為 0.35，取得精確度與辨識率的平衡
+                faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.35); 
             } catch(e) { console.log("載入名單失敗"); }
         }
 
@@ -99,7 +95,12 @@
                     currentDescriptor = d.descriptor;
                     if (faceMatcher) {
                         const match = faceMatcher.findBestMatch(d.descriptor);
-                        currentDetectedName = (match.label === "unknown") ? "未知" : match.label;
+                        // 如果偵測到的信心度在範圍內才更新姓名
+                        if (match.label !== "unknown") {
+                            currentDetectedName = match.label;
+                        } else {
+                            currentDetectedName = "未知";
+                        }
                     }
                     const ctxObj = overlay.getContext('2d');
                     ctxObj.strokeStyle = "#FFFFFF"; ctxObj.lineWidth = 3;
@@ -108,15 +109,16 @@
                     ctxObj.font = "bold 24px 微軟正黑體"; ctxObj.fillStyle = "#FFFFFF";
                     ctxObj.fillText(currentDetectedName, -(d.detection.box.x + d.detection.box.width), d.detection.box.y - 10);
                     ctxObj.restore();
-                } else { currentDetectedName = "未知"; currentDescriptor = null; }
-            }, 300);
+                } else { 
+                    currentDetectedName = "未知"; 
+                    currentDescriptor = null; 
+                }
+            }, 300); // 掃描速度保持 0.3 秒一次
         }
 
         async function handleAction(act) {
             if (currentDetectedName === "未知") { alert("尚未辨識出姓名"); return; }
-            
             document.getElementById('mask').style.display = "flex";
-            
             navigator.geolocation.getCurrentPosition(async (pos) => {
                 try {
                     const res = await fetch(API_URL, { 
@@ -124,7 +126,6 @@
                         body: JSON.stringify({ 
                             type: "CHECKIN", name: currentDetectedName, action: act,
                             lat: pos.coords.latitude, lng: pos.coords.longitude
-                            // 已移除 photo 欄位
                         }) 
                     });
                     const msg = await res.text();
@@ -141,8 +142,9 @@
             if (!name) return;
             
             document.getElementById('mask').style.display = "flex";
-            for(let i = 1; i <= 5; i++) {
-                document.getElementById('status').innerText = `錄製特徵中 (${i}/5)...`;
+            // 註冊時改為抓取 8 組特徵，覆蓋更多角度
+            for(let i = 1; i <= 8; i++) {
+                document.getElementById('status').innerText = `正在錄入特徵 (${i}/8)...`;
                 await new Promise(r => setTimeout(r, 400));
                 if(currentDescriptor) {
                     await fetch(API_URL, { 
@@ -151,7 +153,7 @@
                     });
                 }
             }
-            alert(`註冊完成！系統將重新整理。`);
+            alert(`註冊完成！已錄入 8 組特徵提升辨識率。`);
             location.reload();
         }
 
