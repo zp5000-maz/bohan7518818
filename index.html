@@ -3,22 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>博瀚管理系統</title>
+    <title>博瀚AI辨識管理系統 - 輕量版</title>
     <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
         body { margin: 0; background: #000; color: white; font-family: "微軟正黑體", sans-serif; text-align: center; overflow: hidden; }
         #container { position: relative; width: 100vw; height: 60vh; background: #111; }
         video, canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
         .ui { padding: 15px; background: #000; height: 40vh; box-sizing: border-box; }
-        .btn { padding: 18px 0; font-size: 22px; border-radius: 12px; border: none; margin: 8px 1%; font-weight: bold; width: 45%; transition: 0.2s; }
+        .btn { padding: 18px 0; font-size: 22px; border-radius: 12px; border: none; margin: 8px 1%; font-weight: bold; width: 45%; }
         .on { background: #2E7D32; color: white; }
         .off { background: #C62828; color: white; }
         .reg { background: #333; color: #bbb; width: 93%; margin-top: 10px; font-size: 14px; border: 1px solid #444; }
         #status { font-size: 18px; color: #FFFFFF; padding: 12px; background: #222; min-height: 30px; font-weight: bold; }
-        /* 進度遮罩 */
-        .loading-mask { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: none; z-index: 100; flex-direction: column; justify-content: center; align-items: center; }
-        .spinner { width: 40px; height: 40px; border: 4px solid #444; border-top: 4px solid #FFFFFF; border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .loading-mask { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; z-index: 100; flex-direction: column; justify-content: center; align-items: center; }
     </style>
 </head>
 <body>
@@ -30,31 +27,26 @@
     <div class="ui">
         <button class="btn on" onclick="handleAction('上班')">上班打卡</button>
         <button class="btn off" onclick="handleAction('下班')">下班打卡</button>
-        <button class="btn reg" onclick="startRegister()">曾老師管理模式 (快速註冊)</button>
+        <button class="btn reg" onclick="startRegister()">管理模式 (快速註冊)</button>
     </div>
-    
     <div id="mask" class="loading-mask">
-        <div class="spinner"></div>
-        <div id="mask-text" style="font-size: 18px;">處理中...</div>
+        <div style="font-size: 20px; font-weight: bold;">處理中...</div>
     </div>
 
     <script>
         // ==========================================
-        // 核心設定：已更新博瀚文理座標
+        // 核心設定：已更新指定座標
         // ==========================================
         const API_URL = "https://script.google.com/macros/s/AKfycbzvLPrTwyu0Z4v7aBp2A7VAjRYr3oCeiJEnN9vyibUGhXczqceY-fgVQ2aY2pTw-QM5qA/exec"; 
         const SCHOOL_LOC = { 
-            lat: 22.634489773920293, 
-            lng: 120.33229155480936 
+            lat: 22.60600592058107, 
+            lng: 120.33630488747696 
         }; 
         
         let faceMatcher = null; 
         let isEngineReady = false;
         let currentDetectedName = "未知";
         let currentDescriptor = null;
-
-        const mask = document.getElementById('mask');
-        const maskText = document.getElementById('mask-text');
 
         async function init() {
             try {
@@ -86,10 +78,7 @@
                     nameMap[u.name].push(new Float32Array(u.features));
                 });
                 const labeledDescriptors = Object.keys(nameMap).map(name => new faceapi.LabeledFaceDescriptors(name, nameMap[name]));
-                
-                // [關鍵修正] 閾值從 0.4 調降為 0.3，數值越小辨識越精準、越嚴格，防止誤認
-                faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.3); 
-                console.log("名單同步完成，閾值設定：0.3");
+                faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.3); // 嚴謹門檻
             } catch(e) { console.log("載入名單失敗"); }
         }
 
@@ -110,7 +99,6 @@
                     currentDescriptor = d.descriptor;
                     if (faceMatcher) {
                         const match = faceMatcher.findBestMatch(d.descriptor);
-                        // 如果信心度不足，顯示未知
                         currentDetectedName = (match.label === "unknown") ? "未知" : match.label;
                     }
                     const ctxObj = overlay.getContext('2d');
@@ -125,31 +113,25 @@
         }
 
         async function handleAction(act) {
-            if (currentDetectedName === "未知") { alert("尚未辨識出姓名，請對準鏡頭。"); return; }
-            mask.style.display = "flex";
-            maskText.innerText = "記錄位置中...";
+            if (currentDetectedName === "未知") { alert("尚未辨識出姓名"); return; }
+            
+            document.getElementById('mask').style.display = "flex";
             
             navigator.geolocation.getCurrentPosition(async (pos) => {
-                const video = document.getElementById('video');
-                const photoCanvas = document.createElement('canvas');
-                photoCanvas.width = video.videoWidth; photoCanvas.height = video.videoHeight;
-                const pctx = photoCanvas.getContext('2d');
-                pctx.translate(photoCanvas.width, 0); pctx.scale(-1, 1);
-                pctx.drawImage(video, 0, 0);
-                
                 try {
                     const res = await fetch(API_URL, { 
                         method: "POST", 
                         body: JSON.stringify({ 
                             type: "CHECKIN", name: currentDetectedName, action: act,
-                            lat: pos.coords.latitude, lng: pos.coords.longitude, photo: photoCanvas.toDataURL('image/jpeg', 0.6)
+                            lat: pos.coords.latitude, lng: pos.coords.longitude
+                            // 已移除 photo 欄位
                         }) 
                     });
                     const msg = await res.text();
                     alert(msg === "SUCCESS" ? `✅ ${currentDetectedName} 老師 ${act} 成功` : `❌ 失敗：${msg}`);
-                } catch(e) { alert("連線超時，請重新打卡"); }
-                mask.style.display = "none";
-            }, () => { alert("請開啟定位權限"); mask.style.display = "none"; }, { enableHighAccuracy: true });
+                } catch(e) { alert("系統連線錯誤"); }
+                document.getElementById('mask').style.display = "none";
+            }, () => { alert("請開啟定位權限"); document.getElementById('mask').style.display = "none"; }, { enableHighAccuracy: true });
         }
 
         async function startRegister() {
@@ -158,32 +140,19 @@
             const name = prompt("註冊姓名：");
             if (!name) return;
             
-            mask.style.display = "flex";
-            let successCount = 0;
-
-            // 執行 5 次錄入，確保特徵多樣性
+            document.getElementById('mask').style.display = "flex";
             for(let i = 1; i <= 5; i++) {
-                maskText.innerHTML = `註冊進行中...<br><span style="color:#007BFF">正在抓取特徵 (${i}/5)</span><br>請老師稍微擺動頭部`;
-                await new Promise(r => setTimeout(r, 500));
-                
+                document.getElementById('status').innerText = `錄製特徵中 (${i}/5)...`;
+                await new Promise(r => setTimeout(r, 400));
                 if(currentDescriptor) {
-                    try {
-                        await fetch(API_URL, { 
-                            method: "POST", 
-                            body: JSON.stringify({ type: "REGISTER", name: name, features: Array.from(currentDescriptor) }) 
-                        });
-                        successCount++;
-                    } catch(e) { console.error("傳輸失敗"); }
+                    await fetch(API_URL, { 
+                        method: "POST", 
+                        body: JSON.stringify({ type: "REGISTER", name: name, features: Array.from(currentDescriptor) }) 
+                    });
                 }
             }
-            
-            mask.style.display = "none";
-            if(successCount > 0) {
-                alert(`🎉 註冊成功！\n\n已記錄「${name}」老師 ${successCount} 組特徵。\n系統將自動重新整理。`);
-                location.reload();
-            } else {
-                alert("❌ 註冊失敗：請確保鏡頭有對準人臉。");
-            }
+            alert(`註冊完成！系統將重新整理。`);
+            location.reload();
         }
 
         window.onload = init;
