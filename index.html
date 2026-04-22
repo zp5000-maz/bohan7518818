@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>博瀚AI系統 - 現場端V8</title>
+    <title>博瀚管理系統 - 現場端</title>
     <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
         body { margin: 0; background: #000; color: white; font-family: "微軟正黑體", sans-serif; text-align: center; overflow: hidden; }
@@ -14,12 +14,11 @@
         .on { background: #2E7D32; color: white; }
         .off { background: #C62828; color: white; }
         .reg { background: #333; color: #888; width: 93%; margin-top: 10px; font-size: 14px; border: 1px solid #444; }
-        /* 狀態列改為白色 */
         #status { font-size: 18px; color: #FFFFFF; padding: 12px; background: #222; min-height: 30px; font-weight: bold; }
     </style>
 </head>
 <body>
-    <div id="status">系統啟動中...</div>
+    <div id="status">博瀚 AI 系統初始化中...</div>
     <div id="container">
         <video id="video" autoplay playsinline muted></video>
         <canvas id="overlay"></canvas>
@@ -27,14 +26,15 @@
     <div class="ui">
         <button class="btn on" onclick="handleAction('上班')">上班打卡</button>
         <button class="btn off" onclick="handleAction('下班')">下班打卡</button>
-        <button class="btn reg" onclick="startRegister()">管理模式 (註冊/設定)</button>
+        <button class="btn reg" onclick="startRegister()">  管理模式 (註冊/設定)</button>
     </div>
 
     <script>
+        // [1] 請務必確認此處 URL 正確
         const API_URL = "https://script.google.com/macros/s/AKfycbzvLPrTwyu0Z4v7aBp2A7VAjRYr3oCeiJEnN9vyibUGhXczqceY-fgVQ2aY2pTw-QM5qA/exec"; 
-        const SCHOOL_LOC = { lat: 22.606168413064104, lng: 120.33637527528433 }; 
+        const SCHOOL_LOC = { lat: 22.634489773920293, lng: 120.33229155480936 }; 
         
-        let labeledDescriptors = []; 
+        let faceMatcher = null; 
         let isEngineReady = false;
         let currentDetectedName = "未知";
         let currentDescriptor = null;
@@ -60,33 +60,32 @@
                     processFrame(); 
                 };
             } catch (err) { 
-                statusEl.innerText = "初始化錯誤: " + err.message; 
+                statusEl.innerText = "相機或模型載入失敗"; 
             }
         }
 
-        // 優化名單同步：確保多位老師都能正確辨識
+        // [2] 強化名單抓取邏輯
         async function syncKnownFaces() {
             try { 
                 const resp = await fetch(API_URL);
                 const rawData = await resp.json();
                 
-                if (!rawData || rawData.length === 0) return;
+                if (!rawData || rawData.length === 0) {
+                    console.log("目前尚無註冊名單");
+                    return;
+                }
 
-                const nameMap = {};
-                rawData.forEach(u => {
-                    // 確保特徵值是正確的 Float32Array 格式
-                    const desc = new Float32Array(Object.values(u.features));
-                    if (!nameMap[u.name]) nameMap[u.name] = [];
-                    nameMap[u.name].push(desc);
+                const labeledDescriptors = rawData.map(u => {
+                    // 強制轉換特徵值，確保數值精度一致
+                    const desc = new Float32Array(u.features);
+                    return new faceapi.LabeledFaceDescriptors(u.name, [desc]);
                 });
 
-                labeledDescriptors = Object.keys(nameMap).map(name => {
-                    return new faceapi.LabeledFaceDescriptors(name, nameMap[name]);
-                });
-                console.log("已同步老師人數：" + labeledDescriptors.length);
+                // [重點] 降低辨識門檻至 0.35 (越小越寬鬆)
+                faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.35);
+                console.log("已載入 " + labeledDescriptors.length + " 份老師特徵資料");
             } catch(e) { 
-                console.error("名單同步出錯:", e);
-                statusEl.innerText = "名單載入失敗";
+                console.error("名單同步失敗", e);
             }
         }
 
@@ -105,25 +104,22 @@
                     const d = resized[0];
                     currentDescriptor = d.descriptor;
                     
-                    let name = "未知";
-                    if (labeledDescriptors.length > 0) {
-                        // 閾值設為 0.4 提高辨識靈敏度
-                        const matcher = new faceapi.FaceMatcher(labeledDescriptors, 0.4);
-                        const match = matcher.findBestMatch(d.descriptor);
-                        name = match.toString().split(' ')[0];
+                    if (faceMatcher) {
+                        const match = faceMatcher.findBestMatch(d.descriptor);
+                        const name = match.toString().split(' ')[0];
+                        currentDetectedName = (name === "unknown") ? "未知" : name;
+                    } else {
+                        currentDetectedName = "未知";
                     }
-                    currentDetectedName = (name === "unknown") ? "未知" : name;
                     
                     const box = d.detection.box;
-                    // --- 改為白色外框 ---
                     ctx.strokeStyle = "#FFFFFF"; 
                     ctx.lineWidth = 3;
                     ctx.strokeRect(box.x, box.y, box.width, box.height);
                     
-                    // --- 改為白色姓名文字 ---
                     ctx.save(); 
                     ctx.scale(-1, 1);
-                    ctx.font = "bold 22px 微軟正黑體"; 
+                    ctx.font = "bold 24px 微軟正黑體"; 
                     ctx.fillStyle = "#FFFFFF";
                     ctx.fillText(currentDetectedName, -(box.x + box.width), box.y - 10);
                     ctx.restore();
@@ -134,18 +130,15 @@
             }, 400);
         }
 
-        function getDistanceM(lat1, lon1, lat2, lon2) {
-            const R = 6371; 
-            const dLat = (lat2-lat1)*Math.PI/180; 
-            const dLon = (lon2-lon1)*Math.PI/180;
-            const a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)*Math.sin(dLon/2);
-            return Math.round(R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))) * 1000);
-        }
-
+        // [3] 打卡處理邏輯
         async function handleAction(act) {
-            if (currentDetectedName === "未知") { alert("辨識中，請稍候..."); return; }
+            if (currentDetectedName === "未知") { 
+                alert("AI 還在認人，請面向鏡頭調整角度！"); 
+                return; 
+            }
             
-            statusEl.innerText = "正在定位與記錄影像...";
+            statusEl.innerText = "記錄位置中...";
+            
             const photoCanvas = document.createElement('canvas');
             photoCanvas.width = video.videoWidth; 
             photoCanvas.height = video.videoHeight;
@@ -158,39 +151,32 @@
             navigator.geolocation.getCurrentPosition(async (pos) => {
                 const lat = pos.coords.latitude;
                 const lng = pos.coords.longitude;
-                const dist = getDistanceM(lat, lng, SCHOOL_LOC.lat, SCHOOL_LOC.lng);
-                
-                if (!confirm(`【${currentDetectedName}】老師\n目前距離約 ${dist} 公尺\n確認執行「${act}」？`)) return;
-
-                statusEl.innerText = "資料上傳中...";
-                try {
-                    const res = await fetch(API_URL, { 
-                        method: "POST", 
-                        body: JSON.stringify({ 
-                            type: "CHECKIN", name: currentDetectedName, 
-                            action: act, lat: lat, lng: lng, photo: photoBase64
-                        }) 
-                    });
-                    const result = await res.text();
-                    if (result === "SUCCESS") alert("✅ 打卡成功！");
-                    else alert("失敗：" + result);
-                } catch (e) { alert("網路傳輸錯誤"); }
+                const res = await fetch(API_URL, { 
+                    method: "POST", 
+                    body: JSON.stringify({ 
+                        type: "CHECKIN", name: currentDetectedName, 
+                        action: act, lat: lat, lng: lng, photo: photoBase64
+                    }) 
+                });
+                const result = await res.text();
+                if (result === "SUCCESS") alert("✅ " + currentDetectedName + " 老師打卡成功");
+                else alert("❌ " + result);
                 statusEl.innerText = "博瀚 AI 現場端就緒";
-            }, (err) => alert("請開啟位置存取權限"), { enableHighAccuracy: true });
+            }, (err) => alert("請開啟位置權限"), { enableHighAccuracy: true });
         }
 
         async function startRegister() {
             const pw = prompt("管理密碼：");
             if (pw !== "0000") return; 
-            const n = prompt("註冊姓名：");
-            if (!n || !currentDescriptor) { alert("尚未抓取到人臉特徵"); return; }
-            statusEl.innerText = "正在儲存新老師資料...";
+            const n = prompt("請輸入老師姓名：");
+            if (!n || !currentDescriptor) { alert("尚未偵測到人臉"); return; }
+            statusEl.innerText = "正在錄入特徵...";
             try {
                 await fetch(API_URL, { 
                     method: "POST", 
                     body: JSON.stringify({ type: "REGISTER", name: n, features: Array.from(currentDescriptor) }) 
                 });
-                alert(`註冊成功：${n} 老師`); 
+                alert("註冊成功，請重新整理網頁！"); 
                 location.reload();
             } catch(e) { alert("註冊失敗"); }
         }
