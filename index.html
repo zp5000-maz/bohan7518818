@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>博瀚AI辨識系統 - 穩定版</title>
+    <title>博瀚管理系統 - iOS 優化版</title>
     <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
         body { margin: 0; background: #000; color: white; font-family: "微軟正黑體", sans-serif; text-align: center; overflow: hidden; }
@@ -15,11 +15,11 @@
         .off { background: #C62828; color: white; }
         .reg { background: #333; color: #bbb; width: 93%; margin-top: 10px; font-size: 14px; border: 1px solid #444; }
         #status { font-size: 18px; color: #FFFFFF; padding: 12px; background: #222; min-height: 30px; font-weight: bold; }
-        .loading-mask { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: none; z-index: 100; flex-direction: column; justify-content: center; align-items: center; }
+        .loading-mask { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: none; z-index: 100; flex-direction: column; justify-content: center; align-items: center; }
     </style>
 </head>
 <body>
-    <div id="status">博瀚 AI辨識初始化...</div>
+    <div id="status">博瀚 AI 初始化...</div>
     <div id="container">
         <video id="video" autoplay playsinline muted></video>
         <canvas id="overlay"></canvas>
@@ -34,32 +34,67 @@
     </div>
 
     <script>
-        const API_URL = "
-https://script.google.com/macros/s/AKfycbzvLPrTwyu0Z4v7aBp2A7VAjRYr3oCeiJEnN9vyibUGhXczqceY-fgVQ2aY2pTw-QM5qA/exec"; 
-        const SCHOOL_LOC = { lat: 22.60600592058107, lng: 120.33630488747696 }; 
+        // ==========================================
+        // 核心設定：博瀚文理專屬座標
+        // ==========================================
+        const API_URL = "https://script.google.com/macros/s/AKfycbzvLPrTwyu0Z4v7aBp2A7VAjRYr3oCeiJEnN9vyibUGhXczqceY-fgVQ2aY2pTw-QM5qA/exec"; 
+        const SCHOOL_LOC = { 
+            lat: 22.60600592058107, 
+            lng: 120.33630488747696 
+        }; 
         
         let faceMatcher = null; 
         let isEngineReady = false;
         let currentDetectedName = "未知";
         let currentDescriptor = null;
 
+        // [優化版] 初始化函式：解決 iOS 黑屏問題
         async function init() {
+            const statusEl = document.getElementById('status');
             try {
                 const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
+                statusEl.innerText = "正在載入 AI 模型...";
+                
                 await Promise.all([
                     faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL),
                     faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
                     faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
                 ]);
+
+                statusEl.innerText = "正在讀取老師名單...";
                 await syncKnownFaces();
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
-                document.getElementById('video').srcObject = stream;
-                document.getElementById('video').onplay = () => { 
+
+                statusEl.innerText = "正在喚醒相機...";
+                const constraints = { 
+                    video: { 
+                        facingMode: "user",
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    } 
+                };
+
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                const video = document.getElementById('video');
+                video.srcObject = stream;
+                
+                // 強制設定 iOS 播放屬性
+                video.setAttribute('autoplay', '');
+                video.setAttribute('muted', '');
+                video.setAttribute('playsinline', 'true'); // 必須為 true 避免全螢幕
+                
+                video.onplay = () => { 
                     isEngineReady = true; 
-                    document.getElementById('status').innerText = "博瀚 AI 現場端就緒"; 
+                    statusEl.innerText = "博瀚 AI 現場端就緒"; 
                     processFrame(); 
                 };
-            } catch (err) { document.getElementById('status').innerText = "相機啟動失敗"; }
+
+                // 補償機制：確保影片一定會播放
+                await video.play();
+
+            } catch (err) { 
+                statusEl.innerText = "相機啟動失敗，請檢查 HTTPS 或權限";
+                console.error(err);
+            }
         }
 
         async function syncKnownFaces() {
@@ -73,8 +108,7 @@ https://script.google.com/macros/s/AKfycbzvLPrTwyu0Z4v7aBp2A7VAjRYr3oCeiJEnN9vyi
                     nameMap[u.name].push(new Float32Array(u.features));
                 });
                 const labeledDescriptors = Object.keys(nameMap).map(name => new faceapi.LabeledFaceDescriptors(name, nameMap[name]));
-                // 【調整】將閾值設為 0.35，取得精確度與辨識率的平衡
-                faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.35); 
+                faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.35); // 平衡門檻
             } catch(e) { console.log("載入名單失敗"); }
         }
 
@@ -95,7 +129,6 @@ https://script.google.com/macros/s/AKfycbzvLPrTwyu0Z4v7aBp2A7VAjRYr3oCeiJEnN9vyi
                     currentDescriptor = d.descriptor;
                     if (faceMatcher) {
                         const match = faceMatcher.findBestMatch(d.descriptor);
-                        // 如果偵測到的信心度在範圍內才更新姓名
                         if (match.label !== "unknown") {
                             currentDetectedName = match.label;
                         } else {
@@ -113,7 +146,7 @@ https://script.google.com/macros/s/AKfycbzvLPrTwyu0Z4v7aBp2A7VAjRYr3oCeiJEnN9vyi
                     currentDetectedName = "未知"; 
                     currentDescriptor = null; 
                 }
-            }, 300); // 掃描速度保持 0.3 秒一次
+            }, 300);
         }
 
         async function handleAction(act) {
@@ -142,9 +175,8 @@ https://script.google.com/macros/s/AKfycbzvLPrTwyu0Z4v7aBp2A7VAjRYr3oCeiJEnN9vyi
             if (!name) return;
             
             document.getElementById('mask').style.display = "flex";
-            // 註冊時改為抓取 8 組特徵，覆蓋更多角度
             for(let i = 1; i <= 8; i++) {
-                document.getElementById('status').innerText = `正在錄入特徵 (${i}/8)...`;
+                document.getElementById('status').innerText = `錄製特徵 (${i}/8)...`;
                 await new Promise(r => setTimeout(r, 400));
                 if(currentDescriptor) {
                     await fetch(API_URL, { 
@@ -153,7 +185,7 @@ https://script.google.com/macros/s/AKfycbzvLPrTwyu0Z4v7aBp2A7VAjRYr3oCeiJEnN9vyi
                     });
                 }
             }
-            alert(`註冊完成！已錄入 8 組特徵提升辨識率。`);
+            alert(`註冊完成！`);
             location.reload();
         }
 
