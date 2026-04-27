@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>博瀚管理系統 - 狀態明確版</title>
+    <title>博瀚管理系統 - 活體增強版</title>
     <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
         body { margin: 0; background: #000; color: white; font-family: "微軟正黑體", sans-serif; text-align: center; overflow: hidden; }
@@ -14,8 +14,10 @@
         .on { background: #2E7D32; color: white; }
         .off { background: #C62828; color: white; }
         .reg { background: #333; color: #bbb; width: 93%; margin-top: 10px; font-size: 14px; border: 1px solid #444; }
-        #status { font-size: 16px; color: #FFFFFF; padding: 12px; background: #222; min-height: 25px; font-weight: bold; }
+        #status { font-size: 18px; color: #FFFFFF; padding: 12px; background: #222; min-height: 40px; font-weight: bold; }
         .loading-mask { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: none; z-index: 100; flex-direction: column; justify-content: center; align-items: center; }
+        .challenge-text { color: #FFEB3B; font-size: 24px; animation: blink 1s infinite; }
+        @keyframes blink { 50% { opacity: 0.5; } }
     </style>
 </head>
 <body>
@@ -30,13 +32,11 @@
         <button class="btn reg" onclick="startRegister()">管理模式 (快速註冊)</button>
     </div>
     <div id="mask" class="loading-mask">
-        <div style="font-size: 20px; font-weight: bold;">處理中...</div>
+        <div id="mask-text" style="font-size: 20px; font-weight: bold;">處理中...</div>
     </div>
 
     <script>
         const API_URL = "https://script.google.com/macros/s/AKfycbzvLPrTwyu0Z4v7aBp2A7VAjRYr3oCeiJEnN9vyibUGhXczqceY-fgVQ2aY2pTw-QM5qA/exec"; 
-        const SCHOOL_LOC = { lat: 22.60600592058107, lng: 120.33630488747696 }; 
-        
         let faceMatcher = null; 
         let isEngineReady = false;
         let currentDetectedName = "未知";
@@ -54,12 +54,10 @@
                 ]);
                 await syncKnownFaces();
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
-                const video = document.getElementById('video');
-                video.srcObject = stream;
-                video.onloadedmetadata = () => {
-                    video.play();
+                document.getElementById('video').srcObject = stream;
+                document.getElementById('video').onloadedmetadata = () => {
                     isEngineReady = true; 
-                    statusEl.innerText = "辨識引擎就緒";
+                    statusEl.innerText = "請對準鏡頭";
                     startDetectionLoop();
                 };
             } catch (err) { statusEl.innerText = "啟動出錯: " + err.message; }
@@ -76,7 +74,7 @@
                     nameMap[u.name].push(new Float32Array(u.features));
                 });
                 const labeledDescriptors = Object.keys(nameMap).map(name => new faceapi.LabeledFaceDescriptors(name, nameMap[name]));
-                faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.5); 
+                faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.6); 
             } catch(e) { console.error("同步失敗"); }
         }
 
@@ -101,7 +99,8 @@
                         const match = faceMatcher.findBestMatch(d.descriptor);
                         currentDetectedName = (match.label === "unknown") ? "未知" : match.label;
                     }
-                    statusEl.innerText = "辨識中：" + currentDetectedName;
+                    if(!window.isVerifying) statusEl.innerText = "辨識中：" + currentDetectedName;
+                    
                     const box = d.detection.box;
                     ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 4;
                     ctx.strokeRect(box.x, box.y, box.width, box.height);
@@ -112,15 +111,73 @@
                 } else {
                     currentDetectedName = "未知";
                     currentDescriptor = null;
-                    statusEl.innerText = "請對準鏡頭";
+                    if(!window.isVerifying) statusEl.innerText = "請對準鏡頭";
                 }
             }, 300);
         }
 
-        // [功能新增] 明確顯示上班或下班成功的對話框
+        // --- 活體辨識核心功能 ---
+        async function runLivenessCheck() {
+            const challenges = [
+                { id: 'blink', text: '請眨眨眼' },
+                { id: 'left', text: '請向左轉頭' },
+                { id: 'right', text: '請向右轉頭' }
+            ];
+            const task = challenges[Math.floor(Math.random() * challenges.length)];
+            const statusEl = document.getElementById('status');
+            statusEl.innerHTML = `<span class="challenge-text">${task.text}</span>`;
+            
+            const video = document.getElementById('video');
+            let startTime = Date.now();
+            
+            while (Date.now() - startTime < 6000) { // 6秒寬限期
+                const detection = await faceapi.detectSingleFace(video).withFaceLandmarks();
+                if (detection) {
+                    const landmarks = detection.landmarks;
+                    
+                    if (task.id === 'blink') {
+                        const leftEye = landmarks.getLeftEye();
+                        const rightEye = landmarks.getRightEye();
+                        const getEAR = (eye) => {
+                            const v1 = Math.hypot(eye[1].x - eye[5].x, eye[1].y - eye[5].y);
+                            const v2 = Math.hypot(eye[2].x - eye[4].x, eye[2].y - eye[4].y);
+                            const h1 = Math.hypot(eye[0].x - eye[3].x, eye[0].y - eye[3].y);
+                            return (v1 + v2) / (2 * h1);
+                        };
+                        if (getEAR(leftEye) < 0.22 || getEAR(rightEye) < 0.22) return true;
+                    }
+                    
+                    if (task.id === 'left' || task.id === 'right') {
+                        const nose = landmarks.getNose()[0];
+                        const leftEdge = landmarks.getJawOutline()[0];
+                        const rightEdge = landmarks.getJawOutline()[16];
+                        const totalDist = rightEdge.x - leftEdge.x;
+                        const nosePos = (nose.x - leftEdge.x) / totalDist;
+                        // 因為影像鏡像，左轉頭鼻尖會靠近右邊緣(>0.7)，右轉頭會靠近左邊緣(<0.3)
+                        if (task.id === 'left' && nosePos > 0.7) return true;
+                        if (task.id === 'right' && nosePos < 0.3) return true;
+                    }
+                }
+                await new Promise(r => setTimeout(r, 100));
+            }
+            return false;
+        }
+
         async function handleAction(act) {
             if (currentDetectedName === "未知") { alert("請先認出姓名再打卡"); return; }
+            
+            window.isVerifying = true;
+            const passed = await runLivenessCheck();
+            
+            if (!passed) {
+                alert("活體驗證超時，請重新操作！");
+                window.isVerifying = false;
+                return;
+            }
+
             document.getElementById('mask').style.display = "flex";
+            document.getElementById('mask-text').innerText = "定位中...";
+            
             navigator.geolocation.getCurrentPosition(async (pos) => {
                 try {
                     const res = await fetch(API_URL, { 
@@ -131,16 +188,19 @@
                         }) 
                     });
                     const msg = await res.text();
-                    
-                    // 這裡修改提示訊息，明確帶入「上班」或「下班」
                     if (msg === "SUCCESS") {
                         alert(`✅ ${currentDetectedName} 老師\n${act}打卡成功！`);
                     } else {
-                        alert(`❌ 打卡失敗：\n${msg}`);
+                        alert(`❌ 失敗：${msg}`);
                     }
-                } catch(e) { alert("連線錯誤，請檢查網路"); }
+                } catch(e) { alert("連線錯誤"); }
                 document.getElementById('mask').style.display = "none";
-            }, () => { alert("請開啟手機定位功能"); document.getElementById('mask').style.display = "none"; }, { enableHighAccuracy: true });
+                window.isVerifying = false;
+            }, () => { 
+                alert("請開啟手機定位"); 
+                document.getElementById('mask').style.display = "none";
+                window.isVerifying = false;
+            }, { enableHighAccuracy: true });
         }
 
         async function startRegister() {
@@ -149,10 +209,11 @@
             const name = prompt("註冊姓名：");
             if (!name) return;
             document.getElementById('mask').style.display = "flex";
+            document.getElementById('mask-text').innerText = "特徵錄製中...";
             let successCount = 0;
             for(let i = 1; i <= 10; i++) {
-                document.getElementById('status').innerText = `正在錄製第 ${i} 組特徵...`;
-                await new Promise(r => setTimeout(r, 500));
+                document.getElementById('status').innerText = `錄製第 ${i}/10 組...`;
+                await new Promise(r => setTimeout(r, 600));
                 if(currentDescriptor) {
                     await fetch(API_URL, { 
                         method: "POST", 
