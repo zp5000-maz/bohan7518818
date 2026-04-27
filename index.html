@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>博瀚管理系統 - 活體增強版</title>
+    <title>博瀚管理系統 - 活體防護版</title>
     <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
         body { margin: 0; background: #000; color: white; font-family: "微軟正黑體", sans-serif; text-align: center; overflow: hidden; }
         #container { position: relative; width: 100vw; height: 60vh; background: #111; overflow: hidden;}
         video, canvas { position: absolute; left: 0; top: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
         .ui { padding: 15px; background: #000; height: 40vh; box-sizing: border-box; }
-        .btn { padding: 18px 0; font-size: 22px; border-radius: 12px; border: none; margin: 8px 1%; font-weight: bold; width: 45%; }
+        .btn { padding: 18px 0; font-size: 22px; border-radius: 12px; border: none; margin: 8px 1%; font-weight: bold; width: 45%; cursor: pointer; }
         .on { background: #2E7D32; color: white; }
         .off { background: #C62828; color: white; }
         .reg { background: #333; color: #bbb; width: 93%; margin-top: 10px; font-size: 14px; border: 1px solid #444; }
@@ -29,18 +29,23 @@
     <div class="ui">
         <button class="btn on" onclick="handleAction('上班')">上班打卡</button>
         <button class="btn off" onclick="handleAction('下班')">下班打卡</button>
-        <button class="btn reg" onclick="startRegister()">管理模式 (快速註冊)</button>
+        <button class="btn reg" onclick="startRegister()">管理模式 (照片/現場註冊)</button>
+        <input type="file" id="photoUpload" style="display:none;" accept="image/*" onchange="handleFileUpload(this)">
     </div>
+
     <div id="mask" class="loading-mask">
         <div id="mask-text" style="font-size: 20px; font-weight: bold;">處理中...</div>
     </div>
 
     <script>
+        // 請確保此網址與您的 GAS 部署網址一致
         const API_URL = "https://script.google.com/macros/s/AKfycbzvLPrTwyu0Z4v7aBp2A7VAjRYr3oCeiJEnN9vyibUGhXczqceY-fgVQ2aY2pTw-QM5qA/exec"; 
+        
         let faceMatcher = null; 
         let isEngineReady = false;
         let currentDetectedName = "未知";
         let currentDescriptor = null;
+        window.isVerifying = false; // 活體驗證狀態鎖
 
         async function init() {
             const statusEl = document.getElementById('status');
@@ -54,8 +59,9 @@
                 ]);
                 await syncKnownFaces();
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
-                document.getElementById('video').srcObject = stream;
-                document.getElementById('video').onloadedmetadata = () => {
+                const video = document.getElementById('video');
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
                     isEngineReady = true; 
                     statusEl.innerText = "請對準鏡頭";
                     startDetectionLoop();
@@ -81,7 +87,6 @@
         function startDetectionLoop() {
             const video = document.getElementById('video');
             const overlay = document.getElementById('overlay');
-            const statusEl = document.getElementById('status');
             const displaySize = { width: video.offsetWidth, height: video.offsetHeight };
             faceapi.matchDimensions(overlay, displaySize);
 
@@ -99,7 +104,7 @@
                         const match = faceMatcher.findBestMatch(d.descriptor);
                         currentDetectedName = (match.label === "unknown") ? "未知" : match.label;
                     }
-                    if(!window.isVerifying) statusEl.innerText = "辨識中：" + currentDetectedName;
+                    if(!window.isVerifying) document.getElementById('status').innerText = "辨識中：" + currentDetectedName;
                     
                     const box = d.detection.box;
                     ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 4;
@@ -111,26 +116,25 @@
                 } else {
                     currentDetectedName = "未知";
                     currentDescriptor = null;
-                    if(!window.isVerifying) statusEl.innerText = "請對準鏡頭";
+                    if(!window.isVerifying) document.getElementById('status').innerText = "請對準鏡頭";
                 }
             }, 300);
         }
 
-        // --- 活體辨識核心功能 ---
+        // --- 活體核心：眨眼、左轉、右轉 ---
         async function runLivenessCheck() {
             const challenges = [
-                { id: 'blink', text: '請眨眨眼' },
-                { id: 'left', text: '請向左轉頭' },
-                { id: 'right', text: '請向右轉頭' }
+                { id: 'blink', text: '🔥 活體驗證：請眨眨眼' },
+                { id: 'left', text: '🔥 活體驗證：請向左轉頭' },
+                { id: 'right', text: '🔥 活體驗證：請向右轉頭' }
             ];
             const task = challenges[Math.floor(Math.random() * challenges.length)];
-            const statusEl = document.getElementById('status');
-            statusEl.innerHTML = `<span class="challenge-text">${task.text}</span>`;
+            document.getElementById('status').innerHTML = `<span class="challenge-text">${task.text}</span>`;
             
             const video = document.getElementById('video');
             let startTime = Date.now();
             
-            while (Date.now() - startTime < 6000) { // 6秒寬限期
+            while (Date.now() - startTime < 6000) { // 6秒挑戰時間
                 const detection = await faceapi.detectSingleFace(video).withFaceLandmarks();
                 if (detection) {
                     const landmarks = detection.landmarks;
@@ -151,9 +155,8 @@
                         const nose = landmarks.getNose()[0];
                         const leftEdge = landmarks.getJawOutline()[0];
                         const rightEdge = landmarks.getJawOutline()[16];
-                        const totalDist = rightEdge.x - leftEdge.x;
-                        const nosePos = (nose.x - leftEdge.x) / totalDist;
-                        // 因為影像鏡像，左轉頭鼻尖會靠近右邊緣(>0.7)，右轉頭會靠近左邊緣(<0.3)
+                        const nosePos = (nose.x - leftEdge.x) / (rightEdge.x - leftEdge.x);
+                        // 鏡像補償：左轉(鼻尖向右鏡像邊緣) > 0.7, 右轉 < 0.3
                         if (task.id === 'left' && nosePos > 0.7) return true;
                         if (task.id === 'right' && nosePos < 0.3) return true;
                     }
@@ -170,7 +173,7 @@
             const passed = await runLivenessCheck();
             
             if (!passed) {
-                alert("活體驗證超時，請重新操作！");
+                alert("驗證失敗！請確實執行動作。");
                 window.isVerifying = false;
                 return;
             }
@@ -189,7 +192,7 @@
                     });
                     const msg = await res.text();
                     if (msg === "SUCCESS") {
-                        alert(`✅ ${currentDetectedName} 老師\n${act}打卡成功！`);
+                        alert(`✅ ${currentDetectedName} 老師\n${act}成功！`);
                     } else {
                         alert(`❌ 失敗：${msg}`);
                     }
@@ -203,28 +206,64 @@
             }, { enableHighAccuracy: true });
         }
 
+        // --- 註冊功能：支援現場與照片 ---
         async function startRegister() {
             const pw = prompt("管理密碼：");
             if (pw !== "0000") return;
-            const name = prompt("註冊姓名：");
+
+            const usePhoto = confirm("要使用「上傳照片」註冊嗎？\n(取消則進行現場錄製)");
+            
+            if (usePhoto) {
+                document.getElementById('photoUpload').click();
+            } else {
+                const name = prompt("請輸入註冊姓名：");
+                if (!name) return;
+                document.getElementById('mask').style.display = "flex";
+                document.getElementById('mask-text').innerText = "現場錄製中...";
+                let count = 0;
+                for(let i = 1; i <= 8; i++) {
+                    document.getElementById('status').innerText = `錄製中 (${i}/8)...`;
+                    await new Promise(r => setTimeout(r, 700));
+                    if(currentDescriptor) {
+                        await fetch(API_URL, { 
+                            method: "POST", 
+                            body: JSON.stringify({ type: "REGISTER", name: name, features: Array.from(currentDescriptor) }) 
+                        });
+                        count++;
+                    }
+                }
+                alert(`註冊成功！已錄入 ${count} 組特徵。`);
+                location.reload();
+            }
+        }
+
+        async function handleFileUpload(input) {
+            if (!input.files || !input.files[0]) return;
+            const name = prompt("請輸入照片中的老師姓名：");
             if (!name) return;
+
             document.getElementById('mask').style.display = "flex";
-            document.getElementById('mask-text').innerText = "特徵錄製中...";
-            let successCount = 0;
-            for(let i = 1; i <= 10; i++) {
-                document.getElementById('status').innerText = `錄製第 ${i}/10 組...`;
-                await new Promise(r => setTimeout(r, 600));
-                if(currentDescriptor) {
+            document.getElementById('mask-text').innerText = "解析照片中...";
+
+            try {
+                const img = await faceapi.bufferToImage(input.files[0]);
+                const detection = await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
+                
+                if (!detection) {
+                    alert("偵測不到人臉，請使用正臉且清晰的照片。");
+                } else {
                     await fetch(API_URL, { 
                         method: "POST", 
-                        body: JSON.stringify({ type: "REGISTER", name: name, features: Array.from(currentDescriptor) }) 
+                        body: JSON.stringify({ 
+                            type: "REGISTER", name: name, features: Array.from(detection.descriptor) 
+                        }) 
                     });
-                    successCount++;
+                    alert(`✅ 老師 ${name} 照片註冊成功！`);
                 }
-            }
-            alert(`註冊成功！共錄得 ${successCount} 組特徵。`);
+            } catch (e) { alert("系統出錯"); }
             location.reload();
         }
+
         window.onload = init;
     </script>
 </body>
