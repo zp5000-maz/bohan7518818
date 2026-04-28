@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>博瀚考勤系統 V5.9 秒辨識優化版</title>
+    <title>博瀚考勤系統 V6.1 活體增強版</title>
     <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
         body { margin: 0; background: #0b0e14; color: white; font-family: "微軟正黑體", sans-serif; text-align: center; overflow: hidden; }
@@ -18,14 +18,15 @@
         .reg-group { width: 100%; border: 1px solid #444; border-radius: 15px; padding: 10px; box-sizing: border-box; background: #1a1f26; margin-bottom: 15px; }
         .btn-reg { padding: 12px 0; font-size: 16px; border-radius: 10px; border: 1px solid #555; width: 48%; background: #252a33; color: #fff; cursor: pointer; }
         #status { font-size: 20px; color: #fff; padding: 12px; background: #1a1f26; min-height: 45px; font-weight: bold; }
-        #liveness-overlay { position: fixed; top: 10%; left: 50%; transform: translateX(-50%); background: #fff; color: #000; padding: 15px 30px; border-radius: 50px; font-size: 24px; font-weight: bold; display: none; z-index: 50; }
+        /* 活體指令浮層 - 加強顯眼度 */
+        #liveness-overlay { position: fixed; top: 15%; left: 50%; transform: translateX(-50%); background: #ffeb3b; color: #000; padding: 20px 40px; border-radius: 50px; font-size: 28px; font-weight: bold; display: none; z-index: 50; box-shadow: 0 0 30px rgba(255,235,59,0.5); }
         .loading-mask { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: none; z-index: 100; flex-direction: column; justify-content: center; align-items: center; }
         #flash-frame { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 8px solid #ff0000; box-sizing: border-box; display: none; pointer-events: none; z-index: 20; }
     </style>
 </head>
 <body>
-    <div id="status">⚡ 系統秒辨識引擎載入中...</div>
-    <div id="liveness-overlay">⬅️ 請向左轉頭</div>
+    <div id="status">系統載入中...</div>
+    <div id="liveness-overlay">指令加載中</div>
     <div id="container">
         <video id="video" autoplay playsinline muted></video>
         <div id="flash-frame"></div>
@@ -33,8 +34,8 @@
     </div>
     <div class="ui">
         <div class="btn-row">
-            <button class="btn on" id="btn-in">上班打卡</button>
-            <button class="btn off" id="btn-out">下班打卡</button>
+            <button class="btn on" onclick="handleCheckInFlow('上班')">上班打卡</button>
+            <button class="btn off" onclick="handleCheckInFlow('下班')">下班打卡</button>
         </div>
         <div class="reg-group">
             <div style="color: #bbb; font-size: 14px; margin-bottom: 8px;">管理員設定</div>
@@ -43,7 +44,7 @@
                 <button class="btn-reg" onclick="validateAdmin('photo')">照片匯入註冊</button>
             </div>
         </div>
-        <input type="file" id="photoUpload" style="display:none;" accept="image/*" onchange="handlePhotoRegister(this)">
+        <input type="file" id="photoUpload" style="display:none;" accept="image/*">
     </div>
     <div id="mask" class="loading-mask"><div id="mask-text" style="color:white; font-size:18px;">處理中...</div></div>
 
@@ -51,7 +52,7 @@
         const API_URL = "https://script.google.com/macros/s/AKfycbzV0s07naYRW9F9nSJ8tIbn1K5koo1d9rLiCyNfonvWoSBkV7190Yt9nELUFMLGhuyx/exec"; 
         const MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@master/weights';
         let faceMatcher = null, isEngineReady = false, currentDetectedName = "未知";
-        let isCheckingLiveness = false, livenessTarget = ""; 
+        let isCheckingLiveness = false, livenessCommand = ""; 
         window.isSystemLocked = false;
 
         async function init() {
@@ -63,31 +64,18 @@
                     faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL), 
                     faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL)
                 ]);
-                
                 const resp = await fetch(API_URL);
                 const teachersData = await resp.json();
                 if (teachersData.length) {
-                    const labeled = teachersData.map(u => {
-                        // 確保特徵值轉換為 Float32Array 格式
-                        const descriptors = u.features.map(f => new Float32Array(f));
-                        return new faceapi.LabeledFaceDescriptors(u.name, descriptors);
-                    });
-                    // 將容差調整為 0.6，增加秒辨識成功率
+                    const labeled = teachersData.map(u => new faceapi.LabeledFaceDescriptors(u.name, u.features.map(f => new Float32Array(f))));
                     faceMatcher = new faceapi.FaceMatcher(labeled, 0.6);
                 }
-                
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 640 } });
-                const video = document.getElementById('video');
-                video.srcObject = stream;
-                
-                video.onloadedmetadata = () => {
-                    isEngineReady = true; 
-                    STATUS_DIV.innerText = "請對準鏡頭";
-                    startDetectionLoop();
-                };
-            } catch(e) {
-                STATUS_DIV.innerText = "引擎初始化失敗";
-            }
+                document.getElementById('video').srcObject = stream;
+                isEngineReady = true; 
+                STATUS_DIV.innerText = "請對準鏡頭";
+                startDetectionLoop();
+            } catch(e) { STATUS_DIV.innerText = "載入失敗"; }
         }
 
         async function startDetectionLoop() {
@@ -97,59 +85,73 @@
             
             async function render() {
                 if (!window.isSystemLocked && isEngineReady) {
-                    // 使用 TinyFaceDetector 達到快速偵測
-                    const d = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 160 }))
-                        .withFaceLandmarks()
-                        .withFaceDescriptor();
-                    
+                    const d = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 160 })).withFaceLandmarks().withFaceDescriptor();
                     const ctx = overlay.getContext('2d'); 
                     ctx.clearRect(0, 0, overlay.width, overlay.height);
-                    
                     if (d) {
                         const resized = faceapi.resizeResults(d, displaySize);
                         if (faceMatcher) {
                             const match = faceMatcher.findBestMatch(resized.descriptor);
                             currentDetectedName = match.label !== "unknown" ? match.label : "未知";
                         }
-
                         const box = resized.detection.box;
                         const x = displaySize.width - box.x - box.width; 
-                        ctx.strokeStyle = "#FFFFFF";
-                        ctx.lineWidth = 4;
+                        ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 4;
                         ctx.strokeRect(x, box.y, box.width, box.height);
-                        
-                        // 正向顯示姓名
-                        ctx.font = "bold 24px 微軟正黑體";
-                        ctx.fillStyle = "#FFFFFF";
+                        ctx.font = "bold 24px 微軟正黑體"; ctx.fillStyle = "#FFFFFF";
                         ctx.fillText(currentDetectedName, x + 5, box.y - 10);
                         
+                        // 活體辨識判斷邏輯
                         if (isCheckingLiveness) {
                             const landmarks = d.landmarks;
-                            const nose = landmarks.getNose()[0];
                             const jaw = landmarks.getJawOutline();
+                            const nose = landmarks.getNose()[0];
+                            const mouth = landmarks.getMouth();
+
+                            // 1. 轉頭判斷 (鼻尖位置)
                             const nosePos = (nose.x - jaw[0].x) / (jaw[16].x - jaw[0].x);
-                            if (livenessTarget === "left" && nosePos > 0.72) finishLiveness();
-                            if (livenessTarget === "right" && nosePos < 0.28) finishLiveness();
+
+                            // 2. 張嘴判斷 (計算上下唇距離)
+                            const upperLip = mouth[14].y; // 上唇下緣
+                            const lowerLip = mouth[18].y; // 下唇上緣
+                            const mouthGap = lowerLip - upperLip;
+
+                            if (livenessCommand === "LEFT" && nosePos > 0.75) finishLiveness();
+                            if (livenessCommand === "RIGHT" && nosePos < 0.25) finishLiveness();
+                            if (livenessCommand === "MOUTH" && mouthGap > 15) finishLiveness(); 
                         }
                     } else { currentDetectedName = "未知"; }
                 }
-                requestAnimationFrame(render); // 使用更流暢的渲染模式
+                requestAnimationFrame(render);
             }
             render();
         }
 
-        // 綁定打卡按鈕觸發活體
-        document.getElementById('btn-in').onclick = () => startLivenessCheck('上班');
-        document.getElementById('btn-out').onclick = () => startLivenessCheck('下班');
-
+        // 區分上下班流程
         let pendingAction = "";
-        function startLivenessCheck(act) {
-            if (currentDetectedName === "未知") return alert("尚未辨識出老師姓名，請對準鏡頭");
+        function handleCheckInFlow(act) {
+            if (currentDetectedName === "未知") return alert("尚未辨識出老師姓名");
             pendingAction = act;
+            
+            if (act === "上班") {
+                // 上班需活體
+                startLivenessCheck();
+            } else {
+                // 下班直接打卡
+                handleAction();
+            }
+        }
+
+        function startLivenessCheck() {
             isCheckingLiveness = true;
-            livenessTarget = Math.random() > 0.5 ? "left" : "right";
+            const pool = ["LEFT", "RIGHT", "MOUTH"];
+            livenessCommand = pool[Math.floor(Math.random() * pool.length)];
+            
             const overlay = document.getElementById('liveness-overlay');
-            overlay.innerText = livenessTarget === "left" ? "⬅️ 請向左轉頭" : "➡️ 請向右轉頭";
+            if (livenessCommand === "LEFT") overlay.innerText = "⬅️ 請向左轉頭";
+            else if (livenessCommand === "RIGHT") overlay.innerText = "➡️ 請向右轉頭";
+            else if (livenessCommand === "MOUTH") overlay.innerText = "😮 請張開嘴巴";
+            
             overlay.style.display = "block";
         }
 
@@ -163,82 +165,64 @@
             const finalName = currentDetectedName; 
             window.isSystemLocked = true;
             document.getElementById('mask').style.display = "flex";
-            document.getElementById('mask-text').innerText = "上傳打卡資料中...";
-            
+            document.getElementById('mask-text').innerText = "正在定位並儲存打卡資料...";
             navigator.geolocation.getCurrentPosition(async (pos) => {
                 const res = await fetch(API_URL, { 
                     method: "POST", 
-                    body: JSON.stringify({ 
-                        type: "CHECKIN", 
-                        name: finalName, 
-                        action: pendingAction, 
-                        lat: pos.coords.latitude, 
-                        lng: pos.coords.longitude 
-                    }) 
+                    body: JSON.stringify({ type: "CHECKIN", name: finalName, action: pendingAction, lat: pos.coords.latitude, lng: pos.coords.longitude }) 
                 });
-                alert(await res.text()); 
-                location.reload();
-            }, () => { 
-                alert("打卡失敗：請開啟 GPS 定位授權"); 
-                location.reload(); 
-            });
+                alert(await res.text()); location.reload();
+            }, () => { alert("請開啟 GPS"); location.reload(); });
         }
 
-        // 管理員功能
+        // 管理員功能與照片匯入保持 V6.0 穩定邏輯
         async function validateAdmin(mode) {
-            const pw = prompt("請輸入管理員密碼：");
+            const pw = prompt("管理員密碼：");
             if (!pw) return;
             const res = await fetch(API_URL, { method: "POST", body: JSON.stringify({ type: "CHECK_PW", pw: pw }) });
             if (await res.text() === "AUTH_OK") {
-                mode === 'live' ? startLiveRegister() : document.getElementById('photoUpload').click();
+                if (mode === 'live') startLiveRegister();
+                else document.getElementById('photoUpload').click();
             } else { alert("密碼錯誤"); }
         }
 
+        document.getElementById('photoUpload').onchange = async function(e) {
+            if (!e.target.files.length) return;
+            const name = prompt("匯入老師姓名：");
+            if (!name) return;
+            window.isSystemLocked = true;
+            document.getElementById('mask').style.display = "flex";
+            const img = await faceapi.bufferToImage(e.target.files[0]);
+            const d = await faceapi.detectSingleFace(img, new faceapi.SsdMobilenetv1Options()).withFaceLandmarks().withFaceDescriptor();
+            if (d) {
+                await fetch(API_URL, { method:"POST", body: JSON.stringify({ type:"REGISTER", name: name, features: [Array.from(d.descriptor)] }) });
+                alert("匯入完成");
+            } else { alert("偵測失敗"); }
+            location.reload();
+        };
+
         async function startLiveRegister() {
-            const name = prompt("請輸入老師姓名："); if (!name) return;
+            const name = prompt("註冊姓名："); if (!name) return;
             window.isSystemLocked = true;
             document.getElementById('mask').style.display = "flex";
             const flash = document.getElementById('flash-frame');
             const descriptors = [];
-            
             for (let i = 1; i <= 10; i++) {
-                document.getElementById('mask-text').innerHTML = `正在擷取特徵 (${i}/10)<br>請稍微晃動頭部增加辨識率`;
+                document.getElementById('mask-text').innerHTML = `擷取特徵 (${i}/10)...`;
                 flash.style.display = "block";
                 await new Promise(r => setTimeout(r, 150));
                 flash.style.display = "none";
-
-                // 註冊時使用精準模式 (SSDMobilenet)
-                const d = await faceapi.detectSingleFace(document.getElementById('video'), new faceapi.SsdMobilenetv1Options())
-                    .withFaceLandmarks()
-                    .withFaceDescriptor();
-                
-                if (d) {
-                    descriptors.push(Array.from(d.descriptor));
-                } else {
-                    i--; // 未捕捉到則重來
-                }
+                const d = await faceapi.detectSingleFace(document.getElementById('video'), new faceapi.SsdMobilenetv1Options()).withFaceLandmarks().withFaceDescriptor();
+                if (d) descriptors.push(Array.from(d.descriptor)); else i--;
                 await new Promise(r => setTimeout(r, 300));
             }
-            
             if (descriptors.length >= 8) {
                 await fetch(API_URL, { method:"POST", body: JSON.stringify({ type:"REGISTER", name: name, features: descriptors }) });
-                alert("註冊成功！系統將自動更新。");
+                alert("註冊成功");
             }
             location.reload();
         }
 
-        async function handlePhotoRegister(input) {
-            const name = prompt("姓名："); if(!name) return;
-            window.isSystemLocked = true;
-            document.getElementById('mask').style.display = "flex";
-            const img = await faceapi.bufferToImage(input.files[0]);
-            const d = await faceapi.detectSingleFace(img, new faceapi.SsdMobilenetv1Options()).withFaceLandmarks().withFaceDescriptor();
-            if (d) {
-                await fetch(API_URL, { method:"POST", body: JSON.stringify({ type:"REGISTER", name: name, features: [Array.from(d.descriptor)] }) });
-                alert("完成！");
-            }
-            location.reload();
-        }
         window.onload = init;
     </script>
 </body>
