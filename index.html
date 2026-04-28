@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>博瀚管理系統 - 性能優化版</title>
+    <title>博瀚管理系統 - 穩定優化版</title>
     <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
         body { margin: 0; background: #000; color: white; font-family: "微軟正黑體", sans-serif; text-align: center; overflow: hidden; }
@@ -46,6 +46,10 @@
         let currentDescriptor = null;
         window.isVerifying = false; 
 
+        // --- 緩衝機制變量 ---
+        let unknownCounter = 0; // 連續未偵測到的計數
+        const UNKNOWN_LIMIT = 10; // 連續失敗幾次才變回未知 (約 1.5 秒)
+
         async function init() {
             const statusEl = document.getElementById('status');
             try {
@@ -63,7 +67,7 @@
                 video.onloadedmetadata = () => {
                     isEngineReady = true; 
                     statusEl.innerText = "請對準鏡頭";
-                    startDetectionLoop(); // 啟動優化後的偵測迴圈
+                    startDetectionLoop();
                 };
             } catch (err) { statusEl.innerText = "啟動出錯: " + err.message; }
         }
@@ -79,11 +83,10 @@
                     nameMap[u.name].push(new Float32Array(u.features));
                 });
                 const labeledDescriptors = Object.keys(nameMap).map(name => new faceapi.LabeledFaceDescriptors(name, nameMap[name]));
-                faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.6); 
+                faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.55); // 調降至 0.55 增加通過率
             } catch(e) { console.error("同步失敗"); }
         }
 
-        // --- 優化版偵測迴圈：使用 requestAnimationFrame 避免卡頓 ---
         async function startDetectionLoop() {
             const video = document.getElementById('video');
             const overlay = document.getElementById('overlay');
@@ -91,12 +94,8 @@
             faceapi.matchDimensions(overlay, displaySize);
 
             async function render() {
-                if (!isEngineReady) {
-                    requestAnimationFrame(render);
-                    return;
-                }
+                if (!isEngineReady) { requestAnimationFrame(render); return; }
 
-                // 只有在非「活體挑戰」進行中才執行一般辨識
                 if (!window.isVerifying) {
                     const detections = await faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors();
                     const resized = faceapi.resizeResults(detections, displaySize);
@@ -108,8 +107,16 @@
                         currentDescriptor = d.descriptor;
                         if (faceMatcher) {
                             const match = faceMatcher.findBestMatch(d.descriptor);
-                            currentDetectedName = (match.label === "unknown") ? "未知" : match.label;
+                            let tempName = (match.label === "unknown") ? "未知" : match.label;
+                            
+                            if (tempName !== "未知") {
+                                currentDetectedName = tempName;
+                                unknownCounter = 0; // 只要辨識成功一次，就重置計數
+                            } else {
+                                handleUnknown(); // 雖然有臉但辨識不出
+                            }
                         }
+                        
                         document.getElementById('status').innerText = "辨識中：" + currentDetectedName;
                         
                         const box = d.detection.box;
@@ -120,20 +127,24 @@
                         ctx.fillText(currentDetectedName, -(box.x + box.width), box.y - 10);
                         ctx.restore();
                     } else {
-                        currentDetectedName = "未知";
-                        currentDescriptor = null;
-                        document.getElementById('status').innerText = "請對準鏡頭";
+                        handleUnknown(); // 畫面上沒抓到任何人臉
+                        document.getElementById('status').innerText = (currentDetectedName === "未知") ? "請對準鏡頭" : "辨識中：" + currentDetectedName;
                     }
                 }
-                
-                // 關鍵：偵測完成後才請求下一影格，確保不會堆疊運算
                 requestAnimationFrame(render);
             }
-            
             render();
         }
 
-        // --- 活體核心：左轉、右轉 ---
+        // --- 處理「未知」的緩衝邏輯 ---
+        function handleUnknown() {
+            unknownCounter++;
+            if (unknownCounter >= UNKNOWN_LIMIT) {
+                currentDetectedName = "未知";
+                currentDescriptor = null;
+            }
+        }
+
         async function runLivenessCheck() {
             const challenges = [
                 { id: 'left', text: '🔥 活體驗證：請向左轉頭' },
@@ -157,7 +168,6 @@
                     if (task.id === 'left' && nosePos > 0.72) return true;
                     if (task.id === 'right' && nosePos < 0.28) return true;
                 }
-                // 活體檢測中的小延遲，避免手機過熱
                 await new Promise(r => setTimeout(r, 60));
             }
             return false;
@@ -166,11 +176,11 @@
         async function handleAction(act) {
             if (currentDetectedName === "未知") { alert("請先認出姓名再打卡"); return; }
             
-            window.isVerifying = true; // 暫停一般偵測迴圈的 UI 更新
+            window.isVerifying = true;
             const passed = await runLivenessCheck();
             
             if (!passed) {
-                alert("驗證逾時！請確實轉頭。");
+                alert("驗證失敗或逾時！");
                 window.isVerifying = false;
                 return;
             }
