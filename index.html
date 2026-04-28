@@ -36,7 +36,7 @@
         const API_URL = "https://script.google.com/macros/s/AKfycbzIS_t6OVMMmnlTzlgnhgs-QHzXmB9RclgT25BSvEVWzVSh1J76_mWAaAhhRhbJwT-m5Q/exec"; 
         let faceMatcher = null, isEngineReady = false, currentDetectedName = "未知", currentDescriptor = null;
         let unknownCounter = 0; 
-        const UNKNOWN_LIMIT = 15; // 增加緩衝，減少閃爍未知的機率
+        const UNKNOWN_LIMIT = 20; // 提高容錯率，減少閃爍
         window.isVerifying = false;
 
         async function init() {
@@ -66,8 +66,8 @@
                     nameMap[u.name].push(new Float32Array(u.features)); 
                 });
                 const labeledDescriptors = Object.keys(nameMap).map(name => new faceapi.LabeledFaceDescriptors(name, nameMap[name]));
-                // 將 0.45 調鬆至 0.40，提升對變化的容忍度
-                faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.40);
+                // 門檻降至 0.35 (極限靈敏版)
+                faceMatcher = new faceapi.FaceMatcher(labeledDescriptors, 0.35);
             } catch(e) { console.error("同步失敗"); }
         }
 
@@ -78,6 +78,7 @@
 
             async function render() {
                 if (!window.isVerifying && isEngineReady) {
+                    // 使用更高精準度的辨識 (SSD Mobilenet v1)
                     const detections = await faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors();
                     const resized = faceapi.resizeResults(detections, displaySize);
                     const ctx = overlay.getContext('2d');
@@ -98,15 +99,14 @@
                         const box = resized[0].detection.box;
                         ctx.save();
                         
-                        // 畫白色識別框
+                        // 1. 畫框
                         ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 4;
                         ctx.strokeRect(box.x, box.y, box.width, box.height);
                         
-                        // 修正文字反轉顯示
+                        // 2. 正向文字處理 (修正反轉)
                         ctx.scale(-1, 1);
                         ctx.font = "bold 28px 微軟正黑體";
                         ctx.fillStyle = "#FFFFFF";
-                        // 鏡像環境下座標需重新映射
                         const textX = -(box.x + box.width); 
                         ctx.fillText(currentDetectedName, textX, box.y - 15);
                         
@@ -114,7 +114,7 @@
                         document.getElementById('status').innerText = "識別中：" + currentDetectedName;
                     } else { 
                         if (++unknownCounter >= UNKNOWN_LIMIT) currentDetectedName = "未知"; 
-                        document.getElementById('status').innerText = "請將臉部對準畫面"; 
+                        document.getElementById('status').innerText = "請對準臉部"; 
                     }
                 }
                 requestAnimationFrame(render);
@@ -122,9 +122,6 @@
             render();
         }
 
-        // ... handleAction, runLivenessCheck, startRegister 等其餘代碼維持不變 ...
-        // (省略部分重複邏輯以節省空間，請沿用之前的完整版)
-        
         async function runLivenessCheck() {
             const tasks = [{id:'left', text:'🔥 請向左轉頭'}, {id:'right', text:'🔥 請向右轉頭'}];
             const task = tasks[Math.floor(Math.random()*tasks.length)];
@@ -143,9 +140,9 @@
         }
 
         async function handleAction(act) {
-            if (currentDetectedName === "未知") return alert("尚未識別身份");
+            if (currentDetectedName === "未知") return alert("辨識未通過，請對準鏡頭");
             window.isVerifying = true;
-            if (!(await runLivenessCheck())) { alert("驗證超時，請重新操作"); window.isVerifying = false; return; }
+            if (!(await runLivenessCheck())) { alert("驗證失敗，請重試"); window.isVerifying = false; return; }
             document.getElementById('mask').style.display = "flex";
             navigator.geolocation.getCurrentPosition(async (pos) => {
                 try {
@@ -154,37 +151,38 @@
                         body: JSON.stringify({ type: "CHECKIN", name: currentDetectedName, action: act, lat: pos.coords.latitude, lng: pos.coords.longitude }) 
                     });
                     const msg = await res.text();
-                    alert(msg === "SUCCESS" ? `✅ ${act}成功！` : `📢 ${msg}`);
-                } catch(e) { alert("系統連線異常"); }
+                    alert(msg === "SUCCESS" ? `✅ ${act}完成！` : `📢 ${msg}`);
+                } catch(e) { alert("連線超時"); }
                 document.getElementById('mask').style.display = "none"; window.isVerifying = false;
-            }, () => { alert("打卡需要開啟定位權限"); document.getElementById('mask').style.display = "none"; window.isVerifying = false; }, { enableHighAccuracy: true });
+            }, () => { alert("請開啟GPS定位"); document.getElementById('mask').style.display = "none"; window.isVerifying = false; }, { enableHighAccuracy: true });
         }
 
         async function startRegister() {
-            const pw = prompt("請輸入管理員密碼："); if (pw !== "0000") return;
-            const usePhoto = confirm("使用照片註冊？(取消則採現場錄製)");
+            const pw = prompt("管理密碼："); if (pw !== "0000") return;
+            const usePhoto = confirm("要用照片註冊嗎？");
             if (usePhoto) document.getElementById('photoUpload').click();
             else {
-                const name = prompt("請輸入老師姓名："); if (!name) return;
-                for(let i=1; i<=8; i++) {
-                    document.getElementById('status').innerText = `特徵錄製中 (${i}/8)...`;
+                const name = prompt("老師姓名："); if (!name) return;
+                // 現場錄製增加到 10 次特徵抓取，提高成功率
+                for(let i=1; i<=10; i++) {
+                    document.getElementById('status').innerText = `正在抓取特徵 (${i}/10)...`;
                     await new Promise(r => setTimeout(r, 700));
                     if(currentDescriptor) await fetch(API_URL, { method:"POST", body: JSON.stringify({type:"REGISTER", name, features:Array.from(currentDescriptor)}) });
                 }
-                alert("註冊完畢"); location.reload();
+                alert("註冊完畢，系統將自動同步"); location.reload();
             }
         }
 
         async function handleFileUpload(input) {
-            const name = prompt("請輸入老師姓名："); if (!name || !input.files[0]) return;
+            const name = prompt("老師姓名："); if (!name || !input.files[0]) return;
             try {
                 const img = await faceapi.bufferToImage(input.files[0]);
                 const d = await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
                 if (d) { 
                     await fetch(API_URL, { method:"POST", body: JSON.stringify({type:"REGISTER", name, features:Array.from(d.descriptor)}) }); 
-                    alert("照片註冊成功"); 
-                } else alert("無法從照片中讀取臉部特徵");
-            } catch(e) { alert("處理失敗"); }
+                    alert("照片註冊完成"); 
+                } else alert("照片中辨識不到人臉");
+            } catch(e) { alert("處理錯誤"); }
             location.reload();
         }
         window.onload = init;
