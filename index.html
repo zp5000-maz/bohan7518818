@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>博瀚管理系統 - 活體防護版</title>
+    <title>博瀚管理系統 - 性能優化版</title>
     <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
     <style>
         body { margin: 0; background: #000; color: white; font-family: "微軟正黑體", sans-serif; text-align: center; overflow: hidden; }
@@ -38,14 +38,13 @@
     </div>
 
     <script>
-        // 請確保此網址與您的 GAS 部署網址一致
         const API_URL = "https://script.google.com/macros/s/AKfycbzvLPrTwyu0Z4v7aBp2A7VAjRYr3oCeiJEnN9vyibUGhXczqceY-fgVQ2aY2pTw-QM5qA/exec"; 
         
         let faceMatcher = null; 
         let isEngineReady = false;
         let currentDetectedName = "未知";
         let currentDescriptor = null;
-        window.isVerifying = false; // 活體驗證狀態鎖
+        window.isVerifying = false; 
 
         async function init() {
             const statusEl = document.getElementById('status');
@@ -64,7 +63,7 @@
                 video.onloadedmetadata = () => {
                     isEngineReady = true; 
                     statusEl.innerText = "請對準鏡頭";
-                    startDetectionLoop();
+                    startDetectionLoop(); // 啟動優化後的偵測迴圈
                 };
             } catch (err) { statusEl.innerText = "啟動出錯: " + err.message; }
         }
@@ -84,47 +83,59 @@
             } catch(e) { console.error("同步失敗"); }
         }
 
-        function startDetectionLoop() {
+        // --- 優化版偵測迴圈：使用 requestAnimationFrame 避免卡頓 ---
+        async function startDetectionLoop() {
             const video = document.getElementById('video');
             const overlay = document.getElementById('overlay');
             const displaySize = { width: video.offsetWidth, height: video.offsetHeight };
             faceapi.matchDimensions(overlay, displaySize);
 
-            setInterval(async () => {
-                if (!isEngineReady) return;
-                const detections = await faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors();
-                const resized = faceapi.resizeResults(detections, displaySize);
-                const ctx = overlay.getContext('2d');
-                ctx.clearRect(0, 0, overlay.width, overlay.height);
-                
-                if (resized.length > 0) {
-                    const d = resized[0];
-                    currentDescriptor = d.descriptor;
-                    if (faceMatcher) {
-                        const match = faceMatcher.findBestMatch(d.descriptor);
-                        currentDetectedName = (match.label === "unknown") ? "未知" : match.label;
-                    }
-                    if(!window.isVerifying) document.getElementById('status').innerText = "辨識中：" + currentDetectedName;
-                    
-                    const box = d.detection.box;
-                    ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 4;
-                    ctx.strokeRect(box.x, box.y, box.width, box.height);
-                    ctx.save(); ctx.scale(-1, 1);
-                    ctx.font = "bold 24px 微軟正黑體"; ctx.fillStyle = "#FFFFFF";
-                    ctx.fillText(currentDetectedName, -(box.x + box.width), box.y - 10);
-                    ctx.restore();
-                } else {
-                    currentDetectedName = "未知";
-                    currentDescriptor = null;
-                    if(!window.isVerifying) document.getElementById('status').innerText = "請對準鏡頭";
+            async function render() {
+                if (!isEngineReady) {
+                    requestAnimationFrame(render);
+                    return;
                 }
-            }, 300);
+
+                // 只有在非「活體挑戰」進行中才執行一般辨識
+                if (!window.isVerifying) {
+                    const detections = await faceapi.detectAllFaces(video).withFaceLandmarks().withFaceDescriptors();
+                    const resized = faceapi.resizeResults(detections, displaySize);
+                    const ctx = overlay.getContext('2d');
+                    ctx.clearRect(0, 0, overlay.width, overlay.height);
+                    
+                    if (resized.length > 0) {
+                        const d = resized[0];
+                        currentDescriptor = d.descriptor;
+                        if (faceMatcher) {
+                            const match = faceMatcher.findBestMatch(d.descriptor);
+                            currentDetectedName = (match.label === "unknown") ? "未知" : match.label;
+                        }
+                        document.getElementById('status').innerText = "辨識中：" + currentDetectedName;
+                        
+                        const box = d.detection.box;
+                        ctx.strokeStyle = "#FFFFFF"; ctx.lineWidth = 4;
+                        ctx.strokeRect(box.x, box.y, box.width, box.height);
+                        ctx.save(); ctx.scale(-1, 1);
+                        ctx.font = "bold 24px 微軟正黑體"; ctx.fillStyle = "#FFFFFF";
+                        ctx.fillText(currentDetectedName, -(box.x + box.width), box.y - 10);
+                        ctx.restore();
+                    } else {
+                        currentDetectedName = "未知";
+                        currentDescriptor = null;
+                        document.getElementById('status').innerText = "請對準鏡頭";
+                    }
+                }
+                
+                // 關鍵：偵測完成後才請求下一影格，確保不會堆疊運算
+                requestAnimationFrame(render);
+            }
+            
+            render();
         }
 
-        // --- 活體核心：眨眼、左轉、右轉 ---
+        // --- 活體核心：左轉、右轉 ---
         async function runLivenessCheck() {
             const challenges = [
-                { id: 'blink', text: '🔥 活體驗證：請眨眨眼' },
                 { id: 'left', text: '🔥 活體驗證：請向左轉頭' },
                 { id: 'right', text: '🔥 活體驗證：請向右轉頭' }
             ];
@@ -134,34 +145,20 @@
             const video = document.getElementById('video');
             let startTime = Date.now();
             
-            while (Date.now() - startTime < 6000) { // 6秒挑戰時間
+            while (Date.now() - startTime < 6000) { 
                 const detection = await faceapi.detectSingleFace(video).withFaceLandmarks();
                 if (detection) {
                     const landmarks = detection.landmarks;
+                    const nose = landmarks.getNose()[0];
+                    const leftEdge = landmarks.getJawOutline()[0];
+                    const rightEdge = landmarks.getJawOutline()[16];
+                    const nosePos = (nose.x - leftEdge.x) / (rightEdge.x - leftEdge.x);
                     
-                    if (task.id === 'blink') {
-                        const leftEye = landmarks.getLeftEye();
-                        const rightEye = landmarks.getRightEye();
-                        const getEAR = (eye) => {
-                            const v1 = Math.hypot(eye[1].x - eye[5].x, eye[1].y - eye[5].y);
-                            const v2 = Math.hypot(eye[2].x - eye[4].x, eye[2].y - eye[4].y);
-                            const h1 = Math.hypot(eye[0].x - eye[3].x, eye[0].y - eye[3].y);
-                            return (v1 + v2) / (2 * h1);
-                        };
-                        if (getEAR(leftEye) < 0.22 || getEAR(rightEye) < 0.22) return true;
-                    }
-                    
-                    if (task.id === 'left' || task.id === 'right') {
-                        const nose = landmarks.getNose()[0];
-                        const leftEdge = landmarks.getJawOutline()[0];
-                        const rightEdge = landmarks.getJawOutline()[16];
-                        const nosePos = (nose.x - leftEdge.x) / (rightEdge.x - leftEdge.x);
-                        // 鏡像補償：左轉(鼻尖向右鏡像邊緣) > 0.7, 右轉 < 0.3
-                        if (task.id === 'left' && nosePos > 0.7) return true;
-                        if (task.id === 'right' && nosePos < 0.3) return true;
-                    }
+                    if (task.id === 'left' && nosePos > 0.72) return true;
+                    if (task.id === 'right' && nosePos < 0.28) return true;
                 }
-                await new Promise(r => setTimeout(r, 100));
+                // 活體檢測中的小延遲，避免手機過熱
+                await new Promise(r => setTimeout(r, 60));
             }
             return false;
         }
@@ -169,11 +166,11 @@
         async function handleAction(act) {
             if (currentDetectedName === "未知") { alert("請先認出姓名再打卡"); return; }
             
-            window.isVerifying = true;
+            window.isVerifying = true; // 暫停一般偵測迴圈的 UI 更新
             const passed = await runLivenessCheck();
             
             if (!passed) {
-                alert("驗證失敗！請確實執行動作。");
+                alert("驗證逾時！請確實轉頭。");
                 window.isVerifying = false;
                 return;
             }
@@ -206,7 +203,6 @@
             }, { enableHighAccuracy: true });
         }
 
-        // --- 註冊功能：支援現場與照片 ---
         async function startRegister() {
             const pw = prompt("管理密碼：");
             if (pw !== "0000") return;
